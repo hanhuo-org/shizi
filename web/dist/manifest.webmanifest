@@ -1,0 +1,32 @@
+{
+  "name": "汉火字形 · 拍照识字与古文字检索",
+  "short_name": "汉火字形",
+  "description": "碑帖、拓片、篆刻、草书、甲骨文离线拍照以图搜字 · 16.7万多原型向量库 + 原始字形图",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f7f4ed",
+  "theme_color": "#f7f4ed",
+  "lang": "zh-CN",
+  "icons": [
+    {
+      "src": "./icon-192.png",
+      "sizes": "192x192",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./icon-512.png",
+      "sizes": "512x512",
+      "type": "image/png",
+      "purpose": "any maskable"
+    },
+    {
+      "src": "./favicon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

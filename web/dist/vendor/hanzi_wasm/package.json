@@ -1,0 +1,16 @@
+{
+  "name": "hanzi_wasm",
+  "type": "module",
+  "description": "汉火字形浏览器端 Rust-WASM 预处理与 INT8 向量检索内核",
+  "version": "0.1.0",
+  "files": [
+    "hanzi_wasm_bg.wasm",
+    "hanzi_wasm.js",
+    "hanzi_wasm.d.ts"
+  ],
+  "main": "hanzi_wasm.js",
+  "types": "hanzi_wasm.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}

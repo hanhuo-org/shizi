@@ -1,0 +1,25 @@
+[project]
+name = "hanhuo-shizi"
+version = "0.10.0"
+description = "汉火识字 (Hanfire Shizi Clean V10) — 古文字/甲骨金文/楚简汉印/历代碑帖离线识别与训练工程"
+readme = "README.md"
+requires-python = ">=3.10"
+dependencies = [
+    "torch>=2.2",
+    "torchvision>=0.17",
+    "numpy>=1.24",
+    "pillow>=10.0",
+    "opencv-python-headless>=4.8",
+    "onnx>=1.16",
+    "onnxruntime>=1.18",
+    "opencc-python-reimplemented>=0.1.7",
+    "huggingface_hub>=0.24",
+    "tqdm>=4.66",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["training*"]

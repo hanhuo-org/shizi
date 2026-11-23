@@ -1,0 +1,23 @@
+name = "hanzi-xing-search"
+main = "cf_worker.mjs"
+compatibility_date = "2025-11-01"
+workers_dev = true
+
+# Optional: bind custom domain
+# routes = [
+#   { pattern = "xing.example.org/*", zone_name = "example.org" }
+# ]
+
+[assets]
+directory = "./dist"
+binding = "ASSETS"
+run_worker_first = true
+
+[[r2_buckets]]
+binding = "GLYPH_BUCKET"
+bucket_name = "your-r2-glyph-bucket"
+
+[[d1_databases]]
+binding = "XING_DB"
+database_name = "your-d1-db"
+database_id = "00000000-0000-0000-0000-000000000000"

@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no" />
+  <title>汉火字形 · 高清字形与碑帖原页定位</title>
+  <link rel="icon" href="./favicon.svg?v=20261120c" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg: #f6f1e7;
+      --panel: #fdfbf7;
+      --panel-alt: #f2eadc;
+      --stage-bg: #1e1a17;
+      --border: #dfd4c2;
+      --text: #2a241f;
+      --text-strong: #17120e;
+      --muted: #6c6054;
+      --gold: #a63428;
+      --gold-soft: rgba(166, 52, 40, 0.10);
+      --gold-border: rgba(166, 52, 40, 0.34);
+      --jade: #1a6840;
+      --jade-soft: rgba(26, 104, 64, 0.11);
+      --jade-border: rgba(26, 104, 64, 0.35);
+      --serif: "Noto Serif SC", "Songti SC", "STSong", "SimSun", Georgia, serif;
+      --sans: -apple-system, BlinkMacSystemFont, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    html[data-theme="ink"] {
+      --bg: #141210;
+      --panel: #1d1a17;
+      --panel-alt: #25211d;
+      --stage-bg: #0c0b0a;
+      --border: #38322c;
+      --text: #e6dfd5;
+      --text-strong: #faf6f0;
+      --muted: #a69c90;
+      --gold: #d96b59;
+      --gold-soft: rgba(217, 107, 89, 0.16);
+      --gold-border: rgba(217, 107, 89, 0.42);
+    }
+    html[data-theme="celadon"] {
+      --bg: #eef4f1;
+      --panel: #f9fcfa;
+      --panel-alt: #e3eee8;
+      --stage-bg: #16211d;
+      --border: #c5d8cf;
+      --text: #1f322a;
+      --text-strong: #102019;
+      --muted: #557065;
+      --gold: #b84233;
+      --gold-soft: rgba(184, 66, 51, 0.10);
+      --gold-border: rgba(184, 66, 51, 0.35);
+    }
+    html[data-theme="sea"] {
+      --bg: #eef2f7;
+      --panel: #f9fbfe;
+      --panel-alt: #e2eaf3;
+      --stage-bg: #121a24;
+      --border: #c5d3e3;
+      --text: #1c2c3d;
+      --text-strong: #0e1a28;
+      --muted: #52687f;
+      --gold: #b84233;
+      --gold-soft: rgba(184, 66, 51, 0.10);
+      --gold-border: rgba(184, 66, 51, 0.35);
+    }
+
+    * { box-sizing: border-box; }
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      width: 100%;
+      overflow: hidden;
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+    }
+    .app {
+      display: flex;
+      flex-direction: column;
+      height: 100%;
+      width: 100%;
+    }
+    .topbar {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 10px 16px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--border);
+      z-index: 20;
+    }
+    .top-left {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      min-width: 0;
+    }
+    .char-badge {
+      width: 44px;
+      height: 44px;
+      border-radius: 10px;
+      background: var(--gold-soft);
+      border: 1px solid var(--gold-border);
+      color: var(--gold);
+      font-family: var(--serif);
+      font-size: 1.7rem;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+      line-height: 1;
+    }
+    .title-col {
+      min-width: 0;
+    }
+    .title-row {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .work-title {
+      font-family: var(--serif);
+      font-size: 1.02rem;
+      font-weight: 700;
+      color: var(--text-strong);
+    }
+    .ctx-pill {
+      display: none;
+      align-items: center;
+      gap: 3px;
+      padding: 2px 9px;
+      border-radius: 999px;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      font-family: var(--serif);
+      font-size: 0.82rem;
+      color: var(--text);
+      letter-spacing: 0.08em;
+    }
+    .ctx-pill.show { display: inline-flex; }
+    .ctx-pill b {
+      color: var(--gold);
+      font-size: 0.92rem;
+      padding: 0 2px;
+    }
+    .meta-sub {
+      font-size: 0.76rem;
+      color: var(--muted);
+      margin-top: 2px;
+      font-family: var(--mono);
+    }
+    .top-right {
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    .tab-group {
+      display: inline-flex;
+      background: var(--panel-alt);
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      padding: 3px;
+      gap: 3px;
+    }
+    .tab-btn {
+      border: none;
+      background: transparent;
+      color: var(--muted);
+      font-size: 0.8rem;
+      font-weight: 600;
+      padding: 5px 11px;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: all 0.14s ease;
+    }
+    .tab-btn:hover { color: var(--text); }
+    .tab-btn.active {
+      background: var(--gold);
+      color: #fff;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.18);
+    }
+    .tab-btn:disabled {
+      opacity: 0.42;
+      cursor: not-allowed;
+    }
+    .btn {
+      padding: 6px 11px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      background: var(--panel-alt);
+      color: var(--text);
+      font-size: 0.8rem;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      transition: all 0.14s ease;
+      user-select: none;
+    }
+    .btn:hover { border-color: var(--gold-border); color: var(--gold); }
+    .btn.on {
+      background: var(--gold-soft);
+      border-color: var(--gold);
+      color: var(--gold);
+    }
+    .btn-jade {
+      background: var(--jade-soft);
+      border-color: var(--jade-border);
+      color: var(--jade);
+    }
+
+    .viewport {
+      position: relative;
+      flex: 1;
+      overflow: hidden;
+      background: var(--stage-bg);
+      background-image: radial-gradient(rgba(255, 255, 255, 0.05) 1px, transparent 1px);
+      background-size: 20px 20px;
+      cursor: grab;
+      touch-action: none;
+      user-select: none;
+    }
+    .viewport.dragging { cursor: grabbing; }
+    .stage {
+      position: absolute;
+      top: 0;
+      left: 0;
+      transform-origin: 0 0;
+      will-change: transform;
+    }
+    .stage-img {
+      display: block;
+      user-select: none;
+      -webkit-user-drag: none;
+      pointer-events: none;
+      box-shadow: 0 12px 44px rgba(0, 0, 0, 0.55);
+      border-radius: 3px;
+      background: #fff;
+    }
+    .stage-img.invert { filter: invert(1); }
+    .stage-img.crisp { image-rendering: pixelated; }
+
+    /* 单字米字格辅助线 */
+    .grid-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      pointer-events: none;
+    }
+    .grid-overlay.show { display: block; }
+    .grid-overlay svg { width: 100%; height: 100%; display: block; }
+
+    /* 整页碑帖定位红框 */
+    .stele-box {
+      display: none;
+      position: absolute;
+      pointer-events: none;
+      border: 2.5px solid #ef4444;
+      background: rgba(239, 68, 68, 0.10);
+      box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.72), 0 0 20px rgba(239, 68, 68, 0.65);
+      border-radius: 3px;
+      animation: boxPulse 2.2s ease-in-out infinite;
+    }
+    .stele-box.show { display: block; }
+    @keyframes boxPulse {
+      0%, 100% { box-shadow: 0 0 0 2px rgba(255, 255, 255, 0.78), 0 0 16px rgba(239, 68, 68, 0.60); }
+      50% { box-shadow: 0 0 0 3px rgba(255, 255, 255, 0.92), 0 0 28px rgba(239, 68, 68, 0.90); }
+    }
+    .stele-box-tag {
+      position: absolute;
+      bottom: calc(100% + 5px);
+      left: 50%;
+      transform: translateX(-50%);
+      background: #dc2626;
+      color: #fff;
+      font-family: var(--serif);
+      font-size: 13px;
+      font-weight: 700;
+      padding: 2px 8px;
+      border-radius: 999px;
+      white-space: nowrap;
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.4);
+    }
+
+    .loading-pill {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      padding: 10px 18px;
+      border-radius: 999px;
+      background: rgba(24, 20, 18, 0.85);
+      color: #f8f3ea;
+      font-size: 0.86rem;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      z-index: 15;
+      pointer-events: none;
+    }
+    .loading-pill.hide { display: none; }
+
+    .toolbar {
+      position: absolute;
+      bottom: 16px;
+      left: 50%;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      flex-wrap: wrap;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: 12px;
+      background: rgba(25, 21, 18, 0.86);
+      backdrop-filter: blur(8px);
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      box-shadow: 0 8px 28px rgba(0, 0, 0, 0.45);
+      z-index: 20;
+      max-width: calc(100vw - 24px);
+    }
+    .tb-btn {
+      padding: 5px 10px;
+      border-radius: 7px;
+      border: 1px solid rgba(255, 255, 255, 0.16);
+      background: rgba(255, 255, 255, 0.08);
+      color: #f5efe6;
+      font-size: 0.78rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.14s ease;
+      white-space: nowrap;
+    }
+    .tb-btn:hover { background: rgba(255, 255, 255, 0.18); border-color: rgba(255, 255, 255, 0.34); }
+    .tb-btn.on {
+      background: #c34435;
+      border-color: #ef6f5e;
+      color: #fff;
+    }
+    .tb-btn.hidden { display: none; }
+    .zoom-readout {
+      min-width: 52px;
+      text-align: center;
+      font-family: var(--mono);
+      font-size: 0.78rem;
+      color: #f0d7b8;
+      font-weight: 700;
+    }
+    .hint-tip {
+      position: absolute;
+      top: 12px;
+      left: 14px;
+      padding: 5px 10px;
+      border-radius: 8px;
+      background: rgba(25, 21, 18, 0.72);
+      color: rgba(248, 243, 234, 0.86);
+      font-size: 0.73rem;
+      pointer-events: none;
+      z-index: 10;
+    }
+    @media (max-width: 680px) {
+      .topbar { padding: 8px 10px; }
+      .char-badge { width: 36px; height: 36px; font-size: 1.4rem; }
+      .work-title { font-size: 0.9rem; }
+      .hint-tip { display: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="top-left">
+        <div class="char-badge" id="charBadge">字</div>
+        <div class="title-col">
+          <div class="title-row">
+            <span class="work-title" id="workTitle">高清代表字形</span>
+            <span class="ctx-pill" id="ctxPill"></span>
+          </div>
+          <div class="meta-sub" id="metaSub">正在加载高清原图与碑帖上下文...</div>
+        </div>
+      </div>
+      <div class="top-right">
+        <div class="tab-group" id="modeTabs">
+          <button type="button" class="tab-btn" id="tabPage" disabled title="此字形属于博物馆整页碑帖时可查看原页红框定位">📜 整页碑帖定位</button>
+          <button type="button" class="tab-btn active" id="tabGlyph">🔍 单字高清放大</button>
+        </div>
+        <a class="btn btn-jade" id="pronLink" target="_blank" rel="noopener" style="display:none;">🎙 听古音</a>
+        <a class="btn" id="dlLink" download>⬇ 原图</a>
+      </div>
+    </header>
+
+    <main class="viewport" id="viewport">
+      <div class="hint-tip" id="hintTip">滚轮缩放 · 拖拽平移 · 双击居中复位</div>
+      <div class="loading-pill" id="loadingPill">正在加载高清图像...</div>
+      <div class="stage" id="stage">
+        <img id="stageImg" class="stage-img" alt="高清字形" draggable="false" />
+        <div class="grid-overlay" id="gridOverlay">
+          <svg viewBox="0 0 100 100" preserveAspectRatio="none">
+            <rect x="0.5" y="0.5" width="99" height="99" fill="none" stroke="rgba(220,38,38,0.55)" stroke-width="0.6" />
+            <line x1="50" y1="0" x2="50" y2="100" stroke="rgba(220,38,38,0.45)" stroke-width="0.5" stroke-dasharray="2 2" />
+            <line x1="0" y1="50" x2="100" y2="50" stroke="rgba(220,38,38,0.45)" stroke-width="0.5" stroke-dasharray="2 2" />
+            <line x1="0" y1="0" x2="100" y2="100" stroke="rgba(220,38,38,0.3)" stroke-width="0.4" stroke-dasharray="2 3" />
+            <line x1="100" y1="0" x2="0" y2="100" stroke="rgba(220,38,38,0.3)" stroke-width="0.4" stroke-dasharray="2 3" />
+          </svg>
+        </div>
+        <div class="stele-box" id="steleBox">
+          <div class="stele-box-tag" id="steleBoxTag">字</div>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <button type="button" class="tb-btn" id="zoomOutBtn" title="缩小">－</button>
+        <span class="zoom-readout" id="zoomReadout">100%</span>
+        <button type="button" class="tb-btn" id="zoomInBtn" title="放大">＋</button>
+        <button type="button" class="tb-btn hidden" id="focusBoxBtn" title="平滑缩放聚焦到红框单字与周围邻字">🎯 聚焦红框</button>
+        <button type="button" class="tb-btn" id="fitBtn" title="完整适应视口">🖼 适应窗口</button>
+        <button type="button" class="tb-btn" id="oneToOneBtn" title="1:1 原始像素">1:1</button>
+        <button type="button" class="tb-btn" id="invertBtn" title="黑白反色（方便看拓片/白底黑字）">🌓 反色</button>
+        <button type="button" class="tb-btn" id="gridBtn" title="切换米字格参考线">⊞ 米字格</button>
+        <button type="button" class="tb-btn hidden on" id="toggleBoxBtn" title="显示或隐藏碑帖红框">🟥 红框</button>
+      </div>
+    </main>
+  </div>
+
+  <script>
+    (() => {
+      // 同步主站主题
+      try {
+        const savedTheme = localStorage.getItem("hanfire_inkstone_theme_v1") || localStorage.getItem("hanzi_xing_theme_v1");
+        const themeMap = { xuanmo: "ink", ink: "ink", qingci: "celadon", celadon: "celadon", canghai: "sea", sea: "sea" };
+        if (savedTheme && themeMap[savedTheme]) document.documentElement.setAttribute("data-theme", themeMap[savedTheme]);
+      } catch (_) {}
+
+      const STYLE_ZH = {
+        kaishu: "楷书", xingshu: "行书", caoshu: "草书", lishu: "隶书",
+        zhuanshu: "篆书", xiaozhuan: "小篆", dazhuan: "大篆", jinwen: "金文",
+        jiaguwen: "甲骨文", weibei: "魏碑", zhuanke: "篆刻", jiandu: "简牍",
+        chujian: "楚简", qinjian: "秦简", boshu: "帛书", guxi: "古玺",
+        shiguwen: "石鼓文", unknown: "古文字",
+      };
+
+      const $ = (id) => document.getElementById(id);
+      const qp = new URLSearchParams(location.search);
+      const protoIdRaw = qp.get("id");
+      const protoId = protoIdRaw !== null && /^\d+$/.test(protoIdRaw) ? Number.parseInt(protoIdRaw, 10) : null;
+      const ver = qp.get("v") || "";
+      const chParam = qp.get("ch") || "";
+      const styleParam = qp.get("style") || "";
+      const dynParam = qp.get("dyn") || "";
+      const srcParam = qp.get("src") || "";
+
+      const glyphUrl = srcParam
+        ? srcParam
+        : (protoId !== null ? `./glyph/${protoId}${ver ? `?v=${encodeURIComponent(ver)}` : ""}` : "");
+
+      let currentMode = "glyph"; // "glyph" | "page"
+      let contextData = null;
+      let scale = 1;
+      let tx = 0;
+      let ty = 0;
+      let natW = 0;
+      let natH = 0;
+      let showBox = true;
+
+      const vp = $("viewport");
+      const stage = $("stage");
+      const img = $("stageImg");
+      const steleBox = $("steleBox");
+      const loadingPill = $("loadingPill");
+
+      function updateHeader() {
+        const displayChar = (contextData?.rawChar || chParam || "字");
+        $("charBadge").textContent = displayChar.slice(0, 2);
+        $("steleBoxTag").textContent = displayChar;
+        document.title = `「${displayChar}」${contextData?.title ? ` · ${contextData.title}` : ""} - 汉火字形高清看图`;
+
+        if (contextData?.title) {
+          $("workTitle").textContent = contextData.title;
+        } else if (chParam) {
+          $("workTitle").textContent = `「${chParam}」代表字形原图`;
+        } else {
+          $("workTitle").textContent = "高清字形原图";
+        }
+
+        const ctxText = contextData?.ctx || "";
+        const pill = $("ctxPill");
+        if (ctxText) {
+          const target = contextData?.rawChar || chParam;
+          const idx = target ? ctxText.indexOf(target) : -1;
+          if (idx >= 0) {
+            const esc = (s) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+            pill.innerHTML = `上下文：${esc(ctxText.slice(0, idx))}<b>${esc(ctxText.slice(idx, idx + target.length))}</b>${esc(ctxText.slice(idx + target.length))}`;
+          } else {
+            pill.textContent = `上下文：${ctxText}`;
+          }
+          pill.classList.add("show");
+        } else {
+          pill.classList.remove("show");
+        }
+
+        const parts = [];
+        if (styleParam) parts.push(STYLE_ZH[styleParam] || styleParam);
+        if (dynParam && dynParam !== "unknown") parts.push(dynParam);
+        if (protoId !== null) parts.push(`原型 #${protoId}`);
+        if (natW > 0 && natH > 0) parts.push(currentMode === "page" ? `整页 ${natW}×${natH}` : `单字原图 ${natW}×${natH}`);
+        $("metaSub").textContent = parts.join(" · ") || "高清字形视图";
+
+        const pronChar = chParam || contextData?.rawChar || "";
+        if (pronChar && !pronChar.startsWith("U+")) {
+          $("pronLink").style.display = "inline-flex";
+          $("pronLink").href = `https://yin.hanhuo.org/?text=${encodeURIComponent(pronChar)}`;
+        }
+        const dlTarget = currentMode === "page" && contextData?.pageUrl ? contextData.pageUrl : glyphUrl;
+        if (dlTarget) {
+          $("dlLink").href = dlTarget;
+          $("dlLink").download = currentMode === "page"
+            ? `hanhuo_stele_${protoId ?? "page"}.jpg`
+            : `hanhuo_glyph_${protoId ?? "img"}.jpg`;
+        }
+      }
+
+      function applyTransform(animate = false) {
+        stage.style.transition = animate ? "transform 0.22s cubic-bezier(0.2, 0.8, 0.2, 1)" : "none";
+        stage.style.transform = `translate3d(${tx}px, ${ty}px, 0) scale(${scale})`;
+        $("zoomReadout").textContent = `${Math.round(scale * 100)}%`;
+      }
+
+      function fitToViewport(animate = false) {
+        if (!natW || !natH) return;
+        const vw = vp.clientWidth;
+        const vh = vp.clientHeight;
+        const pad = 48;
+        const sFit = Math.min((vw - pad * 2) / natW, (vh - pad * 2) / natH);
+        // 单字图默认适度放大至清晰可读尺寸（最高 4.2x，不超过视口），整页碑帖完整适应视口
+        scale = currentMode === "glyph" ? Math.max(0.4, Math.min(sFit, 4.2)) : Math.max(0.2, Math.min(sFit, 2.5));
+        tx = (vw - natW * scale) / 2;
+        ty = (vh - natH * scale) / 2;
+        applyTransform(animate);
+      }
+
+      function focusRedBox(animate = false) {
+        if (!natW || !natH || !contextData?.box) {
+          fitToViewport(animate);
+          return;
+        }
+        const [nx0, ny0, nx1, ny1] = contextData.box;
+        const bx = ((nx0 + nx1) / 2) * natW;
+        const by = ((ny0 + ny1) / 2) * natH;
+        const bw = Math.max(24, (nx1 - nx0) * natW);
+        const bh = Math.max(24, (ny1 - ny0) * natH);
+        const vw = vp.clientWidth;
+        const vh = vp.clientHeight;
+        // 让红框字大约占视口短边的 26%，既能看清笔画细节又能看到周围上下左右邻字上下文！
+        const targetSpan = Math.min(vw, vh) * 0.26;
+        scale = Math.max(0.6, Math.min(5.0, targetSpan / Math.max(bw, bh)));
+        tx = vw / 2 - bx * scale;
+        ty = vh / 2 - by * scale;
+        applyTransform(animate);
+      }
+
+      function zoomAt(factor, cx, cy) {
+        const nextScale = Math.max(0.2, Math.min(10, scale * factor));
+        const ratio = nextScale / scale;
+        tx = cx - (cx - tx) * ratio;
+        ty = cy - (cy - ty) * ratio;
+        scale = nextScale;
+        applyTransform(false);
+      }
+
+      function positionSteleBox() {
+        if (currentMode !== "page" || !contextData?.box || !natW || !natH) {
+          steleBox.classList.remove("show");
+          return;
+        }
+        const [nx0, ny0, nx1, ny1] = contextData.box;
+        steleBox.style.left = `${nx0 * natW}px`;
+        steleBox.style.top = `${ny0 * natH}px`;
+        steleBox.style.width = `${Math.max(8, (nx1 - nx0) * natW)}px`;
+        steleBox.style.height = `${Math.max(8, (ny1 - ny0) * natH)}px`;
+        steleBox.classList.toggle("show", showBox);
+      }
+
+      function loadMode(mode) {
+        currentMode = mode;
+        $("tabPage").classList.toggle("active", mode === "page");
+        $("tabGlyph").classList.toggle("active", mode === "glyph");
+        $("focusBoxBtn").classList.toggle("hidden", mode !== "page");
+        $("toggleBoxBtn").classList.toggle("hidden", mode !== "page");
+        $("gridBtn").classList.toggle("hidden", mode === "page");
+        if (mode === "page") $("gridOverlay").classList.remove("show");
+        else $("gridOverlay").classList.toggle("show", $("gridBtn").classList.contains("on"));
+
+        const url = mode === "page" && contextData?.pageUrl ? contextData.pageUrl : glyphUrl;
+        if (!url) {
+          loadingPill.textContent = "未提供有效图像参数";
+          loadingPill.classList.remove("hide");
+          return;
+        }
+        loadingPill.textContent = mode === "page" ? "正在加载整页高清碑帖..." : "正在加载高清单字原图...";
+        loadingPill.classList.remove("hide");
+        steleBox.classList.remove("show");
+
+        img.onload = () => {
+          natW = img.naturalWidth;
+          natH = img.naturalHeight;
+          img.style.width = `${natW}px`;
+          img.style.height = `${natH}px`;
+          loadingPill.classList.add("hide");
+          updateHeader();
+          positionSteleBox();
+          if (mode === "page") focusRedBox(false);
+          else fitToViewport(false);
+        };
+        img.onerror = () => {
+          loadingPill.textContent = "图像加载失败，请刷新重试";
+        };
+        img.src = url;
+      }
+
+      // 滚轮缩放
+      vp.addEventListener("wheel", (e) => {
+        e.preventDefault();
+        const r = vp.getBoundingClientRect();
+        const factor = e.deltaY < 0 ? 1.18 : 1 / 1.18;
+        zoomAt(factor, e.clientX - r.left, e.clientY - r.top);
+      }, { passive: false });
+
+      // 拖拽平移 + 双指缩放
+      const pointers = new Map();
+      let lastPinchDist = 0;
+      let dragLast = null;
+
+      vp.addEventListener("pointerdown", (e) => {
+        if (e.target.closest(".toolbar")) return;
+        vp.setPointerCapture(e.pointerId);
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 1) {
+          dragLast = { x: e.clientX, y: e.clientY };
+          vp.classList.add("dragging");
+        } else if (pointers.size === 2) {
+          const pts = Array.from(pointers.values());
+          lastPinchDist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+          dragLast = null;
+        }
+      });
+      vp.addEventListener("pointermove", (e) => {
+        if (!pointers.has(e.pointerId)) return;
+        pointers.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        if (pointers.size === 1 && dragLast) {
+          tx += e.clientX - dragLast.x;
+          ty += e.clientY - dragLast.y;
+          dragLast = { x: e.clientX, y: e.clientY };
+          applyTransform(false);
+        } else if (pointers.size === 2) {
+          const pts = Array.from(pointers.values());
+          const dist = Math.hypot(pts[1].x - pts[0].x, pts[1].y - pts[0].y);
+          if (lastPinchDist > 0 && dist > 0) {
+            const r = vp.getBoundingClientRect();
+            const mx = (pts[0].x + pts[1].x) / 2 - r.left;
+            const my = (pts[0].y + pts[1].y) / 2 - r.top;
+            zoomAt(dist / lastPinchDist, mx, my);
+          }
+          lastPinchDist = dist;
+        }
+      });
+      const endPointer = (e) => {
+        pointers.delete(e.pointerId);
+        if (pointers.size < 2) lastPinchDist = 0;
+        if (pointers.size === 1) {
+          const rem = Array.from(pointers.values())[0];
+          dragLast = { x: rem.x, y: rem.y };
+        } else {
+          dragLast = null;
+          vp.classList.remove("dragging");
+        }
+      };
+      vp.addEventListener("pointerup", endPointer);
+      vp.addEventListener("pointercancel", endPointer);
+
+      vp.addEventListener("dblclick", (e) => {
+        if (e.target.closest(".toolbar")) return;
+        if (currentMode === "page") focusRedBox(true);
+        else fitToViewport(true);
+      });
+
+      $("zoomInBtn").addEventListener("click", () => zoomAt(1.3, vp.clientWidth / 2, vp.clientHeight / 2));
+      $("zoomOutBtn").addEventListener("click", () => zoomAt(1 / 1.3, vp.clientWidth / 2, vp.clientHeight / 2));
+      $("fitBtn").addEventListener("click", () => fitToViewport(true));
+      $("focusBoxBtn").addEventListener("click", () => focusRedBox(true));
+      $("oneToOneBtn").addEventListener("click", () => {
+        if (!natW || !natH) return;
+        scale = 1;
+        tx = (vp.clientWidth - natW) / 2;
+        ty = (vp.clientHeight - natH) / 2;
+        applyTransform(true);
+      });
+      $("invertBtn").addEventListener("click", (e) => {
+        const on = img.classList.toggle("invert");
+        e.currentTarget.classList.toggle("on", on);
+      });
+      $("gridBtn").addEventListener("click", (e) => {
+        const on = e.currentTarget.classList.toggle("on");
+        $("gridOverlay").classList.toggle("show", on && currentMode === "glyph");
+      });
+      $("toggleBoxBtn").addEventListener("click", (e) => {
+        showBox = !showBox;
+        e.currentTarget.classList.toggle("on", showBox);
+        positionSteleBox();
+      });
+      $("tabPage").addEventListener("click", () => { if (contextData?.hasPage) loadMode("page"); });
+      $("tabGlyph").addEventListener("click", () => loadMode("glyph"));
+      window.addEventListener("resize", () => {
+        if (currentMode === "page") focusRedBox(false);
+        else fitToViewport(false);
+      });
+
+      // 启动：若为原型 ID，先拉取碑帖上下文元数据；有整页碑帖时默认进入「整页碑帖定位」
+      async function boot() {
+        updateHeader();
+        if (protoId !== null) {
+          try {
+            const resp = await fetch(`./api/glyph-context/${protoId}`);
+            if (resp.ok) {
+              const data = await resp.json();
+              if (data?.ok) contextData = data;
+            }
+          } catch (_) {}
+        }
+        if (contextData?.hasPage) {
+          $("tabPage").disabled = false;
+          updateHeader();
+          loadMode("page");
+        } else {
+          $("tabPage").disabled = true;
+          $("tabPage").title = "该基础单字原型无整页碑帖原图，仅支持单字高清放大";
+          updateHeader();
+          loadMode("glyph");
+        }
+      }
+      boot();
+    })();
+  </script>
+</body>
+</html>

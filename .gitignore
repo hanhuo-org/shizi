@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+*.egg-info/
+.pytest_cache/
+
+# Rust build artifacts
+**/target/
+
+# Large downloaded/generated weights, datasets, packs & local training workdirs
+release_artifacts/
+checkpoints/
+data/
+work/
+web/packs/
+web/wrangler.toml
+
+# Web runtime large binary chunks (installed via scripts/download_weights.py)
+web/dist/models_chunks/
+web/dist/vendor/ort/
+web/dist/assets/*.bin
+web/dist/assets/*.gz
+
+# OS / Editor
+.DS_Store
+.vscode/
+.idea/

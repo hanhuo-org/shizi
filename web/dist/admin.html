@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>汉火字形 · 站长审核与众包向量后台</title>
+  <link rel="icon" href="./favicon.svg?v=20261120a" type="image/svg+xml" />
+  <style>
+    :root {
+      --bg: #f7f4ed; --panel: #fdfbf7; --panel-alt: #f1ece0; --border: #ddd3be;
+      --gold: #c34435; --gold-soft: rgba(195, 68, 53, 0.11); --gold-border: rgba(195, 68, 53, 0.42);
+      --jade: #1a6840; --jade-soft: rgba(26, 104, 64, 0.11); --jade-border: rgba(26, 104, 64, 0.38); --jade-fg: #145332;
+      --text: #2b2623; --muted: #6e6459; --serif: "Noto Serif CJK SC", "Songti SC", serif;
+      --sans: system-ui, -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+      --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+    }
+    * { box-sizing: border-box; }
+    body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.5; }
+    .wrap { max-width: 1200px; margin: 0 auto; padding: 20px 16px 60px; }
+    header { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 12px; padding-bottom: 14px; border-bottom: 1px solid var(--border); margin-bottom: 16px; }
+    h1 { margin: 0; font-family: var(--serif); font-size: 1.45rem; color: var(--gold); }
+    .auth-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+    input, select { padding: 7px 10px; border-radius: 8px; border: 1px solid var(--border); background: #fff; color: var(--text); font-size: 0.86rem; }
+    button, a.btn { padding: 7px 13px; border-radius: 8px; border: 1px solid var(--border); background: var(--panel); color: var(--text); font-size: 0.82rem; font-weight: 600; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; gap: 4px; }
+    button.primary { background: linear-gradient(135deg, #c94e3f, #a73427); color: #fdfbf7; border-color: var(--gold); }
+    button.jade { background: var(--jade-soft); color: var(--jade-fg); border-color: var(--jade-border); }
+    button.danger { color: #b42318; border-color: rgba(180, 35, 24, 0.35); background: rgba(180, 35, 24, 0.06); }
+    .tabs { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 14px; }
+    .tab { padding: 8px 14px; border-radius: 9px; }
+    .tab.active { background: linear-gradient(135deg, #c94e3f, #a73427); color: #fdfbf7; border-color: var(--gold); }
+    .stats { display: flex; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .stat { padding: 8px 14px; border-radius: 9px; border: 1px solid var(--border); background: var(--panel); font-size: 0.82rem; }
+    .stat b { color: var(--gold); font-family: var(--mono); font-size: 1rem; margin-left: 4px; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .list { display: flex; flex-direction: column; gap: 10px; }
+    .item { background: var(--panel); border: 1px solid var(--border); border-radius: 11px; padding: 14px; display: flex; flex-wrap: wrap; gap: 14px; align-items: flex-start; }
+    .thumb { width: 96px; height: 96px; object-fit: contain; background: #fff; border: 1px solid var(--border); border-radius: 8px; flex-shrink: 0; }
+    .body { flex: 1; min-width: 240px; }
+    .row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 6px; }
+    .pill { font-size: 0.72rem; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--border); background: var(--panel-alt); color: var(--muted); }
+    .pill.ok { border-color: var(--jade-border); background: var(--jade-soft); color: var(--jade-fg); }
+    .pill.warn { border-color: var(--gold-border); background: var(--gold-soft); color: var(--gold); }
+    .actions { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+    .msg { font-size: 0.84rem; color: var(--muted); margin-bottom: 10px; }
+  </style>
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>汉火字形 · 站长审核与众包字库后台</h1>
+        <div style="font-size:0.8rem;color:var(--muted);">审核通过并采纳向量后，所有用户端点击「联网更新字库」即可秒级学会新字形</div>
+      </div>
+      <div class="auth-bar">
+        <input id="tokenInput" type="password" placeholder="输入 ADMIN_TOKEN 口令" style="width:210px;" />
+        <button id="loginBtn" class="primary">登录加载</button>
+        <button id="exportBtn" class="jade" style="display:none;">⬇ 导出众包 JSON</button>
+        <a href="./" class="btn">← 返回前台</a>
+      </div>
+    </header>
+
+    <div id="statusMsg" class="msg">请输入 Cloudflare Workers Secret 中配置的 ADMIN_TOKEN 登录。</div>
+    <div id="statsBar" class="stats" style="display:none;"></div>
+
+    <div id="tabsBar" class="tabs" style="display:none;">
+      <button class="tab active" data-tab="feedback">💬 识别反馈与向量审核 (<span id="cntFb">0</span>)</button>
+      <button class="tab" data-tab="help">🆘 帮看帖审核与定案 (<span id="cntHelp">0</span>)</button>
+      <button class="tab" data-tab="comments">📝 帮看评论审核 (<span id="cntCom">0</span>)</button>
+    </div>
+
+    <div id="panel-feedback" class="panel active"><div id="fbList" class="list"></div></div>
+    <div id="panel-help" class="panel"><div id="helpList" class="list"></div></div>
+    <div id="panel-comments" class="panel"><div id="comList" class="list"></div></div>
+  </div>
+
+  <script>
+    const TOKEN_KEY = "hanzi_xing_admin_token_v1";
+    const $ = (id) => document.getElementById(id);
+    const STYLES = ["unknown","kaishu","xingshu","caoshu","lishu","xiaozhuan","zhuanshu","jinwen","jiaguwen","weibei","zhuanke","zhangcao","chuwenzi","qinwenzi","chunqiu","zhanguo","jiandu","jinshi"];
+    const STYLE_ZH = {
+      unknown: "未标注", kaishu: "楷书", xingshu: "行书", caoshu: "草书", lishu: "隶书",
+      xiaozhuan: "小篆", zhuanshu: "篆书", jinwen: "金文", jiaguwen: "甲骨文", weibei: "魏碑",
+      zhuanke: "篆刻", zhangcao: "章草", chuwenzi: "楚文字", qinwenzi: "秦文字",
+      chunqiu: "春秋", zhanguo: "战国", jiandu: "简牍", jinshi: "金石",
+    };
+    const zhStyle = (s) => STYLE_ZH[s] || s || "未标注";
+    const buildStyleOptions = (selected) => {
+      const sel = selected || "unknown";
+      const list = STYLES.includes(sel) ? STYLES : [...STYLES, sel];
+      return list.map((s) => `<option value="${esc(s)}" ${s === sel ? "selected" : ""}>${esc(zhStyle(s))}</option>`).join("");
+    };
+    const esc = (s) => String(s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+
+    $("tokenInput").value = sessionStorage.getItem(TOKEN_KEY) || "";
+    function getToken() { return $("tokenInput").value.trim(); }
+
+    async function api(path, opts = {}) {
+      const resp = await fetch(path, {
+        ...opts,
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${getToken()}`,
+          ...(opts.headers || {}),
+        },
+      });
+      const data = await resp.json();
+      if (!resp.ok || !data.ok) throw new Error(data.error || `HTTP ${resp.status}`);
+      return data;
+    }
+
+    document.querySelectorAll(".tab").forEach((t) => {
+      t.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((b) => b.classList.toggle("active", b === t));
+        document.querySelectorAll(".panel").forEach((p) => p.classList.toggle("active", p.id === `panel-${t.dataset.tab}`));
+      });
+    });
+
+    async function loadAll() {
+      const tok = getToken();
+      if (!tok) return;
+      sessionStorage.setItem(TOKEN_KEY, tok);
+      $("statusMsg").textContent = "正在拉取待审核队列...";
+      try {
+        const d = await api("./api/admin/overview");
+        $("statsBar").style.display = "flex";
+        $("tabsBar").style.display = "flex";
+        $("exportBtn").style.display = "inline-flex";
+
+        const fb = d.feedbacks || [], hp = d.help_posts || [], hc = d.help_comments || [];
+        const vecCount = fb.filter((x) => x.vec_approved).length + hp.filter((x) => x.vec_approved).length;
+        const pendFb = fb.filter((x) => !x.is_public && !x.vec_approved).length;
+        const pendHp = hp.filter((x) => !x.is_public).length;
+        const pendHc = hc.filter((x) => !x.is_public).length;
+
+        $("cntFb").textContent = `${pendFb}待审 / 共${fb.length}`;
+        $("cntHelp").textContent = `${pendHp}待审 / 共${hp.length}`;
+        $("cntCom").textContent = `${pendHc}待审 / 共${hc.length}`;
+        $("statsBar").innerHTML = `
+          <div class="stat">已采纳联网向量 <b>${vecCount}</b></div>
+          <div class="stat">待审反馈 <b>${pendFb}</b></div>
+          <div class="stat">待审帮看帖 <b>${pendHp}</b></div>
+          <div class="stat">待审帮看评论 <b>${pendHc}</b></div>
+        `;
+        $("statusMsg").textContent = `已加载最新数据（${new Date().toLocaleTimeString()}）`;
+        renderFeedbacks(fb);
+        renderHelpPosts(hp);
+        renderHelpComments(hc);
+      } catch (err) {
+        $("statusMsg").textContent = `❌ 加载失败：${err.message}`;
+      }
+    }
+
+    function renderFeedbacks(list) {
+      const box = $("fbList");
+      box.innerHTML = list.length ? "" : '<div class="msg">暂无识别反馈</div>';
+      for (const it of list) {
+        const el = document.createElement("div");
+        el.className = "item";
+        const imgHtml = it.image_key ? `<a href="./upload/${esc(it.image_key)}" target="_blank"><img class="thumb" src="./upload/${esc(it.image_key)}" /></a>` : "";
+        const styleOpts = buildStyleOptions(it.style);
+        el.innerHTML = `
+          ${imgHtml}
+          <div class="body">
+            <div class="row">
+              <strong>#${it.id} ${esc(it.nickname)}</strong>
+              <span class="pill warn">${"★".repeat(it.rating)}${"☆".repeat(5 - it.rating)}</span>
+              <span class="pill ${it.is_public ? "ok" : ""}">${it.is_public ? "已公开评论墙" : "未公开"}</span>
+              <span class="pill ${it.vec_approved ? "ok" : ""}">${it.vec_approved ? "✅ 已入联网字库" : (it.has_vector ? "含512维向量(待采纳)" : "无向量")}</span>
+              <span class="pill">模型Top1: ${esc(it.top1_char || "-")} (${Number(it.top1_score || 0).toFixed(3)})</span>
+              <span style="font-size:0.74rem;color:var(--muted);">${esc((it.created_at || "").slice(0, 16).replace("T", " "))}</span>
+            </div>
+            <div style="font-size:0.88rem;margin:4px 0;">${esc(it.comment || "（无文字评论）")}</div>
+            <div class="row" style="margin-top:8px;">
+              <label style="font-size:0.78rem;">正确汉字 <input class="inp-ch" value="${esc(it.correct_char)}" style="width:76px;" /></label>
+              <label style="font-size:0.78rem;">书体 <select class="inp-st">${styleOpts}</select></label>
+            </div>
+            <div class="actions">
+              <button class="btn-pub">${it.is_public ? "取消公开" : "✓ 公开到评论墙"}</button>
+              <button class="jade btn-vec" ${!it.has_vector ? "disabled" : ""}>${it.vec_approved ? "移出联网字库" : "✅ 保存汉字并采纳进联网字库"}</button>
+              <button class="danger btn-del">🗑 删除</button>
+            </div>
+          </div>
+        `;
+        el.querySelector(".btn-pub").onclick = async () => {
+          await api(`./api/admin/feedback/${it.id}`, { method: "PATCH", body: JSON.stringify({ is_public: it.is_public ? 0 : 1 }) });
+          loadAll();
+        };
+        el.querySelector(".btn-vec").onclick = async () => {
+          const ch = el.querySelector(".inp-ch").value.trim();
+          const st = el.querySelector(".inp-st").value;
+          if (!it.vec_approved && !ch) { alert("请先填写正确的对应汉字再采纳进字库！"); return; }
+          await api(`./api/admin/feedback/${it.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ correct_char: ch, style: st, vec_approved: it.vec_approved ? 0 : 1, status: it.vec_approved ? "pending" : "adopted" }),
+          });
+          loadAll();
+        };
+        el.querySelector(".btn-del").onclick = async () => {
+          if (!confirm(`确定删除反馈 #${it.id}（含 R2 图片）？`)) return;
+          await api(`./api/admin/feedback/${it.id}`, { method: "DELETE" });
+          loadAll();
+        };
+        box.appendChild(el);
+      }
+    }
+
+    function renderHelpPosts(list) {
+      const box = $("helpList");
+      box.innerHTML = list.length ? "" : '<div class="msg">暂无帮看求助帖</div>';
+      for (const it of list) {
+        const el = document.createElement("div");
+        el.className = "item";
+        const imgHtml = it.image_key ? `<a href="./upload/${esc(it.image_key)}" target="_blank"><img class="thumb" src="./upload/${esc(it.image_key)}" /></a>` : "";
+        const styleOpts = buildStyleOptions(it.resolved_style || it.style_hint);
+        const cands = (it.top_candidates || []).map((c) => `${c.char}(${Number(c.score || 0).toFixed(2)})`).join(" / ");
+        el.innerHTML = `
+          ${imgHtml}
+          <div class="body">
+            <div class="row">
+              <strong>帮看 #${it.id} · ${esc(it.nickname)}</strong>
+              <span class="pill ${it.is_public ? "ok" : "warn"}">${it.is_public ? "已公开帮看广场" : "待审核"}</span>
+              <span class="pill ${it.vec_approved ? "ok" : ""}">${it.vec_approved ? `✅ 已定案入库「${esc(it.resolved_char)}」` : (it.has_vector ? "含512维向量" : "无向量")}</span>
+              <span style="font-size:0.74rem;color:var(--muted);">${esc((it.created_at || "").slice(0, 16).replace("T", " "))}</span>
+            </div>
+            <div style="font-size:0.88rem;margin:4px 0;">${esc(it.title_note || "（无出处说明）")}</div>
+            ${cands ? `<div style="font-size:0.76rem;color:var(--muted);">当时模型候选：${esc(cands)}</div>` : ""}
+            <div class="row" style="margin-top:8px;">
+              <label style="font-size:0.78rem;">定案汉字 <input class="inp-ch" value="${esc(it.resolved_char)}" style="width:76px;" /></label>
+              <label style="font-size:0.78rem;">书体 <select class="inp-st">${styleOpts}</select></label>
+            </div>
+            <div class="actions">
+              <button class="btn-pub">${it.is_public ? "隐藏帖子" : "✓ 审核公开到帮看广场"}</button>
+              <button class="jade btn-vec" ${!it.has_vector ? "disabled" : ""}>${it.vec_approved ? "移出联网字库" : "✅ 定案并采纳进联网字库"}</button>
+              <button class="danger btn-del">🗑 删除</button>
+            </div>
+          </div>
+        `;
+        el.querySelector(".btn-pub").onclick = async () => {
+          await api(`./api/admin/help/${it.id}`, { method: "PATCH", body: JSON.stringify({ is_public: it.is_public ? 0 : 1, status: it.is_public ? "pending" : "open" }) });
+          loadAll();
+        };
+        el.querySelector(".btn-vec").onclick = async () => {
+          const ch = el.querySelector(".inp-ch").value.trim();
+          const st = el.querySelector(".inp-st").value;
+          if (!it.vec_approved && !ch) { alert("请先填写定案汉字！"); return; }
+          await api(`./api/admin/help/${it.id}`, {
+            method: "PATCH",
+            body: JSON.stringify({ resolved_char: ch, resolved_style: st, vec_approved: it.vec_approved ? 0 : 1, status: it.vec_approved ? "open" : "resolved" }),
+          });
+          loadAll();
+        };
+        el.querySelector(".btn-del").onclick = async () => {
+          if (!confirm(`确定删除帮看帖 #${it.id}（含评论与 R2 图片）？`)) return;
+          await api(`./api/admin/help/${it.id}`, { method: "DELETE" });
+          loadAll();
+        };
+        box.appendChild(el);
+      }
+    }
+
+    function renderHelpComments(list) {
+      const box = $("comList");
+      box.innerHTML = list.length ? "" : '<div class="msg">暂无帮看评论</div>';
+      for (const it of list) {
+        const el = document.createElement("div");
+        el.className = "item";
+        const imgHtml = it.post_image_key ? `<img class="thumb" src="./upload/${esc(it.post_image_key)}" style="width:68px;height:68px;" />` : "";
+        el.innerHTML = `
+          ${imgHtml}
+          <div class="body">
+            <div class="row">
+              <strong>评论 #${it.id}（帮看帖 #${it.post_id}）· ${esc(it.nickname)}</strong>
+              ${it.suggested_char ? `<span class="pill warn">认作：「${esc(it.suggested_char)}」</span>` : ""}
+              <span class="pill ${it.is_public ? "ok" : ""}">${it.is_public ? "已公开" : "待审核"}</span>
+              ${it.is_accepted ? `<span class="pill ok">🏆 最佳答案</span>` : ""}
+            </div>
+            <div style="font-size:0.86rem;margin:4px 0;">${esc(it.comment || "（无补充说明）")}</div>
+            <div class="actions">
+              <button class="btn-pub">${it.is_public ? "隐藏评论" : "✓ 审核公开"}</button>
+              <button class="jade btn-acc">${it.is_accepted ? "取消最佳" : "🏆 公开并标为最佳答案"}</button>
+              <button class="danger btn-del">🗑 删除</button>
+            </div>
+          </div>
+        `;
+        el.querySelector(".btn-pub").onclick = async () => {
+          await api(`./api/admin/help-comments/${it.id}`, { method: "PATCH", body: JSON.stringify({ is_public: it.is_public ? 0 : 1, status: it.is_public ? "pending" : "approved" }) });
+          loadAll();
+        };
+        el.querySelector(".btn-acc").onclick = async () => {
+          const next = it.is_accepted ? 0 : 1;
+          await api(`./api/admin/help-comments/${it.id}`, { method: "PATCH", body: JSON.stringify({ is_public: 1, is_accepted: next, status: "approved" }) });
+          loadAll();
+        };
+        el.querySelector(".btn-del").onclick = async () => {
+          if (!confirm(`确定删除评论 #${it.id}？`)) return;
+          await api(`./api/admin/help-comments/${it.id}`, { method: "DELETE" });
+          loadAll();
+        };
+        box.appendChild(el);
+      }
+    }
+
+    $("loginBtn").onclick = loadAll;
+    $("tokenInput").addEventListener("keydown", (e) => { if (e.key === "Enter") loadAll(); });
+    $("exportBtn").onclick = async () => {
+      const resp = await fetch("./api/admin/export", { headers: { Authorization: `Bearer ${getToken()}` } });
+      if (!resp.ok) { alert("导出失败"); return; }
+      const blob = await resp.blob();
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = "hanzi_xing_community_export.json";
+      a.click();
+    };
+    if (getToken()) loadAll();
+  </script>
+</body>
+</html>
