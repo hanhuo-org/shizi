@@ -1840,7 +1840,7 @@
     <header>
       <div class="brand">
         <h1>汉火字形 · 拍照识字与古文字检索</h1>
-        <p>碑帖拓片 · 甲骨金文 · 篆刻草书 · 本机离线识别、透视拉正与 21.70 万多原型字形库</p>
+        <p>碑帖拓片 · 甲骨金文 · 篆刻草书 · 类似“人脸识别”的本机离线古字检索与 22.23 万字形库</p>
       </div>
       <div class="header-right">
         <div class="badges">
@@ -2039,7 +2039,7 @@
           <div class="multi-res-head">
             <span class="multi-res-title" id="multiResTitle">📑 整段释文（点击任意字查看并替换候选）</span>
             <div style="display:flex;gap:6px;flex-wrap:wrap;align-items:center;">
-              <label class="lm-toggle" title="结合古汉语二元搭配词频（诗文/成语）自动对视觉歧义字做语境纠偏">
+              <label class="lm-toggle" title="结合古汉语三元(3-gram)+四分域(甲骨卜辞/青铜金文/汉印官印/碑帖诗文)语言模型自动做二阶 Viterbi 上下文纠偏">
                 <input type="checkbox" id="multiLmToggle" checked />
                 <span>🧠 古文语境纠偏</span>
               </label>
@@ -2064,7 +2064,7 @@
         </div>
         <div id="emptyState" class="empty-state">
           请上传一张碑帖或古文字照片，或点击上方「真照片试测」体验一键识字。<br />
-          <span style="font-size:0.78rem;">首次点击检索会下载约 103 MB 字形识别库并缓存在本机，此后完全离线毫秒级出结果。</span>
+          <span style="font-size:0.78rem;">首次点击检索会下载约 127 MB 字形模型与向量库并缓存在本机，此后完全离线毫秒级出结果。</span>
         </div>
       </section>
     </div>
@@ -2089,24 +2089,24 @@
     <!-- ===================== 视图 3：技术原理、致谢与素材授权 ===================== -->
     <div id="view-about" class="view-panel">
       <div class="about-hero">
-        <h2>🔥 汉火字形 · 技术原理、致谢与素材授权</h2>
-        <p>将原本需要服务器跑的 Rust + ONNX + 2.7 GB 向量检索完整搬进浏览器，结合 Rust-WASM 图像预处理、ResNet50+ArcFace 权重量化与 21.70 万多原型 INT8 向量库，在缩小 39 倍的同时保留全部 21.70 万张无损代表原图。</p>
+        <h2>🔥 汉火字形 · 原理简介、取舍与致谢</h2>
+        <p>汉火字形做的<strong>不是传统文字识别（OCR）</strong>，而是类似<strong>“人脸识别”</strong>的古字检索：把拍下的古字当成一张“脸”提取特征，去 22.23 万历代字形底库里找长得最像的字与原碑拓片。整套引擎压缩后装进浏览器，本机离线毫秒级出结果，照片绝不上传服务器。</p>
       </div>
       <div class="about-grid">
         <div class="about-card">
-          <h3>一、原汁原味 Rust → WASM 图像预处理</h3>
+          <h3>一、像“人脸识别”一样认古字（为什么不做 OCR？）</h3>
           <ul>
-            <li><strong>彩色描漆感知</strong>：针对摩崖朱红描漆与石面同亮度问题，自动按 RGB 通道色差提取笔画并闭运算连通；</li>
-            <li><strong>拓片反色与自适应二值化</strong>：基于积分图局部均值阈值，自动识别黑底白字拓片并翻正；</li>
-            <li><strong>智能去边框 + 四点透视拉正</strong>：自动擦除字典方框，支持手动拖四个角点校正斜拍梯形变形并一键重生成黑白图。</li>
+            <li><strong>先提“字脸”，再做 1:N 比对</strong>：模型不直接背答案，而是把单字骨架与笔势算成 512 维特征向量，再去 22.23 万字形库里按相似度排序，顺手翻出最像的原碑拓片对照。</li>
+            <li><strong>为什么不做传统文字识别（OCR）？</strong>古字异体繁多、狂草连笔、新出土甲骨楚简不断增加；传统 OCR 像死板单选题，字种定死后遇到冷僻字或新字形就抓瞎，且无法给出来源依据。检索式方案只看“像不像”，天然支持扩充新字形（不用推倒重训），还能给出多个候选与原拓出处。</li>
+            <li><strong>拍歪、反色、红漆也能认</strong>：内置 Rust-WASM 图像预处理，自动翻转黑底白字拓片、提取摩崖朱红描漆、去除方框，并支持四点拖拽拉正透视变形。</li>
           </ul>
         </div>
         <div class="about-card">
-          <h3>二、21.70 万多原型 INT8 与无损原图</h3>
+          <h3>二、硬件、算法与数据上的务实取舍</h3>
           <ul>
-            <li><strong>从 126.8 万字形提炼多原型</strong>：对 61,154 个「字×书体」大类执行球面多原型聚簇，完整保留草书、甲骨文、石经古文等异体分支；</li>
-            <li><strong>ResNet50 Weight-Only U8</strong>：仅 25 MB 传输体积，与 FP32 原版余弦相似度 > 0.9986；</li>
-            <li><strong>OPFS 整包零合并 + R2 原图直出</strong>：模型与 21.70 万向量一次落盘本机 OPFS，点击卡片直接从 R2 边缘缓存无损直出对应代表原图。</li>
+            <li><strong>硬件取舍（放弃云端显卡，搬进浏览器）</strong>：不依赖昂贵的云端 GPU 服务器，把模型与 22.23 万 INT8 压缩向量全放进本机浏览器（Rust-WASM + 可选 WebGPU）；首次缓存后离线秒开，既免去服务器开销与排队等待，也彻底保护照片隐私。</li>
+            <li><strong>算法取舍（大老师带小徒弟 + 极致压缩）</strong>：先用 8,860 万参数大模型（ConvNeXt-Base）配合“一字多中心”和 1,217 个汉字偏旁部件规律把古字学透，再蒸馏给 2,860 万参数小模型（ConvNeXt-Tiny），经 Weight-Only U8 量化压到 <strong>27.5 MB</strong>（与原版一致率 99.997%），手机也能流畅跑。</li>
+            <li><strong>数据取舍（大字库打底 + 真实文物精调）</strong>：先用 123.5 万清洗多书体字形记牢上万冷僻字，再拿 8.4 万真实甲骨、金文、楚简、汉印与名碑拓片专项抗噪微调，并用权重融合（WiSE-FT）在“认得全”与“扛得住残损模糊”之间取得平衡。</li>
           </ul>
         </div>
 
@@ -2116,7 +2116,7 @@
           <ul>
             <li><strong>EVOBC（汉字字形演变数据集）</strong>：华中科技大学 VLRLab、华南理工大学、阿德莱德大学、安阳师范学院等团队联合开源，涵盖甲骨文、金文、篆书、春秋、战国、隶书六个历史阶段的 229,170 张古文字图像（论文 <em>An open dataset for the evolution of oracle bone characters: EVOBC</em>）。</li>
             <li><strong>HUST-OBC（华中科技大学甲骨文数据集）</strong>：华中科技大学 VLRLab 等团队开源（<em>Scientific Data</em>, 2024），汇集《新甲骨文编》《甲骨文六位数字编码》、殷契文渊、国学大师与 HWOBC 等来源的 140,053 张已释与未释甲骨文字形。</li>
-            <li><strong>汉典（zdic）与历代公版碑帖书法字书整理</strong>：综合汇整汉典公开古文字形、公开书法字库及历代公版碑帖拓片与法帖汇编，经感知哈希（pHash）跨源去重、单字质量筛选与朝代/书家元数据校准后构成 126.8 万字形训练全库（18 种书体、20 个朝代标签）。</li>
+            <li><strong>汉典（zdic）与历代公版碑帖、出土文物拓片整理</strong>：综合汇整汉典公开古文字形、公开书法字库及历代公版名碑帖、殷墟甲骨、商周青铜铭文、战国楚简与汉代玺印拓片，经感知哈希（pHash）去重与质量校准，形成 123.5 万清洗基础字库 + 5.66 万真实拓片原型（共 22.23 万检索原型、18 种书体、20 个朝代标签）。</li>
             <li><strong>热心书友众包共建</strong>：感谢每一位在「打分纠错」与「帮看广场」上传实拍碑帖、考证残碑疑难字并贡献特征向量的书友。</li>
           </ul>
         </div>
@@ -2124,11 +2124,11 @@
         <div class="about-card">
           <h3>四、核心开源技术与基础设施致谢</h3>
           <ul>
-            <li><strong>PyTorch / torchvision (ResNet50) &amp; ArcFace</strong>：视觉编码骨干与球面角度间隔度量学习框架（BSD-3-Clause / MIT）。</li>
+            <li><strong>PyTorch / timm (ConvNeXt) &amp; 多中心 ArcFace</strong>：大模型教师蒸馏小模型骨干，结合球面多中心度量学习与汉字 IDS 部件结构监督（BSD-3-Clause / Apache-2.0 / MIT）。</li>
             <li><strong>ONNX Runtime Web</strong>：微软开源浏览器端跨平台推理引擎（MIT），驱动多核 WASM SIMD 与可选 WebGPU 加速。</li>
-            <li><strong>Rust / wasm-bindgen / image</strong>：编译本机预处理与 21.70 万多原型 INT8 向量极速扫描内核（MIT / Apache-2.0）。</li>
+            <li><strong>Rust / wasm-bindgen / image</strong>：编译本机图像预处理与 22.23 万多原型 INT8 向量极速扫描内核（MIT / Apache-2.0）。</li>
             <li><strong>@jsquash/webp (Google libwebp WASM)</strong>：为 Safari 等无原生 WebP 编码器的浏览器提供全端一致的前端压缩能力（Apache-2.0 / BSD-3-Clause）。</li>
-            <li><strong>Cloudflare Workers / R2 / D1</strong>：承载全球边缘静态加速、21.70 万代表原图 Range 直出与社区众包审核数据库。</li>
+            <li><strong>Cloudflare Workers / R2 / D1</strong>：承载全球边缘静态加速、22.23 万代表原图 Range 直出与社区众包审核数据库。</li>
           </ul>
         </div>
 
@@ -2174,7 +2174,7 @@
     </div>
 
     <footer>
-      汉火字形 · ResNet50+ArcFace + <span id="footerProtoCount">21.70 万</span>多原型向量库 · 本机离线计算，照片绝不上传服务器 ·
+      汉火字形 · ConvNeXt-Tiny V12 + <span id="footerProtoCount">22.23 万</span>字形特征库 · 本机离线计算，照片绝不上传服务器 ·
     <div id="boxContextMenu" class="box-ctx-menu" hidden>
       <button type="button" id="ctxReSearchOneBtn" class="box-ctx-item">⚡ 仅重识此字</button>
       <button type="button" id="ctxDeleteBoxBtn" class="box-ctx-item danger">🗑 删除此框</button>
@@ -2192,9 +2192,9 @@
       </div>
       <div class="traffic-box">
         <div style="font-size:0.78rem;color:var(--muted);">本次预计下载字形识别库体积</div>
-        <div id="mobileDlSizeText" class="traffic-size">约 110.0 MB</div>
+        <div id="mobileDlSizeText" class="traffic-size">约 127.0 MB</div>
         <p class="traffic-note">
-          检测到您正在使用手机/移动设备。识字模型与 21.70 万字形库全部在本机离线运行，照片不会上传服务器。首次检索需下载上述数据包（完成后自动缓存在本机，下次离线秒开不再消耗流量），建议在 Wi-Fi 下继续。
+          检测到您正在使用手机/移动设备。识字模型与 22.23 万字形库全部在本机离线运行，照片不会上传服务器。首次检索需下载上述数据包（完成后自动缓存在本机，下次离线秒开不再消耗流量），建议在 Wi-Fi 下继续。
         </p>
       </div>
       <div style="display:flex;justify-content:flex-end;gap:8px;">
@@ -2343,7 +2343,7 @@
     import { compressDataUrlToWebp } from "./webp_compress.mjs?v=20261121d";
     import { saveStudioSession, loadStudioSession, clearStudioSession } from "./model_cache.mjs?v=20261123c";
 
-    const ASSET_VER = "20261123j";
+    const ASSET_VER = "20261127a";
     const THEME_KEY = "hanfire_inkstone_theme_v1";
     const BACKEND_PREF_KEY = "hanzi_xing_backend_pref_v1";
     const NICKNAME_KEY = "hanzi_xing_nickname_v1";
@@ -4709,7 +4709,7 @@
 
     // 手机流量确认弹窗
     function formatRemainingMB() {
-      const miss = lastCacheProbe ? lastCacheProbe.missingGzBytes : 103.1e6;
+      const miss = lastCacheProbe ? lastCacheProbe.missingGzBytes : 133.2e6;
       const extra = lastCacheProbe?.hasUpdate ? 0 : 7.0e6;
       const est = (miss + extra) / 1e6;
       return `约 ${Math.max(1, est).toFixed(1)} MB`;
@@ -4850,7 +4850,7 @@
       isBusy = true;
       $("searchBtn").disabled = true;
       $("searchBtn").textContent = "正在识别与检索...";
-      $("statusText").textContent = "本机视觉编码 + 21.70 万多原型向量检索中...";
+      $("statusText").textContent = "本机视觉编码 + 22.23 万字形特征库检索中...";
       const copyBuf = decodedRgba.slice().buffer;
       worker.postMessage(
         {
@@ -4955,7 +4955,7 @@
       return `./viewer.html?${params.toString()}`;
     }
 
-    // 原图弹窗（兼容 19.5 万 R2 原图 + 社区 R2 WebP 原图 + 高清缩放/整页碑帖定位页）
+    // 原图弹窗（兼容 22.23 万 R2 原图 + 社区 R2 WebP 原图 + 高清缩放/整页碑帖定位页）
     function openLightbox(hit, rank) {
       const imgUrl = hit.imageUrl || `./glyph/${hit.id}`;
       $("lbTitle").textContent = hit.isCommunity
@@ -5081,7 +5081,7 @@
       }
       const tm = msg.timings || {};
       const commTag = msg.communityCount > 0 ? ` + ${msg.communityCount}社区` : "";
-      $("statusText").textContent = `✓ 检索完成：预处理 ${tm.preprocessMs ?? "-"}ms · 识别 ${tm.inferMs ?? "-"}ms · 21.70万${commTag}库扫描 ${tm.searchMs ?? "-"}ms`;
+      $("statusText").textContent = `✓ 检索完成：预处理 ${tm.preprocessMs ?? "-"}ms · 识别 ${tm.inferMs ?? "-"}ms · 22.23万${commTag}库扫描 ${tm.searchMs ?? "-"}ms`;
       $("pctText").textContent = `${tm.totalMs ?? "-"} ms`;
       $("barFill").style.width = "100%";
 

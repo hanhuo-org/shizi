@@ -1,18 +1,18 @@
 #!/usr/bin/env python3
 """
-一键下载并安装「汉火识字 Clean V10」预训练权重与本地 Web 离线模型包。
+一键下载并安装「汉火识字 Clean V12」预训练权重与本地 Web 离线模型包。
 
-默认从 GitHub Release 拉取（支持通过 --local-dir 直接从本地 release_artifacts/ 安装，方便离线或尚未发版时测试）：
-  - shizi-v10-web-models.tar.gz   (~137 MB) -> 解压至 web/dist/（即可直接 python web/serve_local.py 启动本地 Web！）
-  - wiseft_v10_a070.pt            (~214 MB) -> checkpoints/wiseft_v10_a070.pt（微调/重算原型用）
-  - wiseft_v10_a070_op17_wo_u8.onnx (~27 MB)-> checkpoints/wiseft_v10_a070_op17_wo_u8.onnx
-  - char_det_best.pt              (~13 MB)  -> checkpoints/char_det_best.pt
-  - char_det_u8.onnx              (~3.7 MB) -> checkpoints/char_det_u8.onnx
-  - classes_meta.tar.gz           (~188 KB) -> checkpoints/classes_meta/
+默认从 GitHub Release 拉取（支持通过 --local-dir 直接从本地 release_artifacts/ 安装）：
+  - shizi-v12-web-models.tar.gz        (~142 MB) -> 解压至 web/dist/（即可 python web/serve_local.py 启动！）
+  - convnext_tiny_v12_best.pt          (~468 MB) -> checkpoints/convnext_tiny_v12_best.pt（微调/重算原型用）
+  - convnext_tiny_v12_op17_wo_u8.onnx  (~28 MB)  -> checkpoints/convnext_tiny_v12_op17_wo_u8.onnx
+  - char_det_best.pt                   (~13 MB)  -> checkpoints/char_det_best.pt
+  - char_det_u8.onnx                   (~3.7 MB) -> checkpoints/char_det_u8.onnx
+  - classes_meta.tar.gz                (~319 KB) -> checkpoints/classes_meta/
 
 用法：
-  python scripts/download_weights.py                       # 仅拉取本地 Web 必需包 (~137 MB)
-  python scripts/download_weights.py --all                 # 拉取 Web 包 + 全部训练/推理权重 (~393 MB)
+  python scripts/download_weights.py                       # 仅拉取本地 Web 必需包 (~142 MB)
+  python scripts/download_weights.py --all                 # 拉取 Web 包 + 全部训练/推理权重 (~654 MB)
   python scripts/download_weights.py --local-dir release_artifacts --all
 """
 from __future__ import annotations
@@ -26,12 +26,12 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent.parent
 DEFAULT_REPO = "hanhuo-org/shizi"
-DEFAULT_TAG = "v10"
+DEFAULT_TAG = "v12"
 
-WEB_ASSETS = ["shizi-v10-web-models.tar.gz"]
+WEB_ASSETS = ["shizi-v12-web-models.tar.gz"]
 TRAIN_ASSETS = [
-    "wiseft_v10_a070.pt",
-    "wiseft_v10_a070_op17_wo_u8.onnx",
+    "convnext_tiny_v12_best.pt",
+    "convnext_tiny_v12_op17_wo_u8.onnx",
     "char_det_best.pt",
     "char_det_u8.onnx",
     "classes_meta.tar.gz",
@@ -50,7 +50,7 @@ def download_url(url: str, dst: Path):
     dst.parent.mkdir(parents=True, exist_ok=True)
     tmp = dst.with_suffix(dst.suffix + ".part")
     print(f"  [GET] {url}", flush=True)
-    req = urllib.request.Request(url, headers={"User-Agent": "HanfireShiziInstaller/1.0"})
+    req = urllib.request.Request(url, headers={"User-Agent": "HanfireShiziInstaller/1.2"})
     with urllib.request.urlopen(req, timeout=120) as r, open(tmp, "wb") as f:
         total = int(r.headers.get("Content-Length") or 0)
         done = 0
@@ -82,7 +82,7 @@ def fetch_asset(name: str, repo: str, tag: str, cache_dir: Path, local_dir: Path
 
 
 def main():
-    ap = argparse.ArgumentParser(description="下载并安装汉火识字 Clean V10 权重与 Web 模型包")
+    ap = argparse.ArgumentParser(description="下载并安装汉火识字 Clean V12 权重与 Web 模型包")
     ap.add_argument("--repo", default=DEFAULT_REPO, help=f"GitHub 仓库 (默认 {DEFAULT_REPO})")
     ap.add_argument("--tag", default=DEFAULT_TAG, help=f"Release 标签 (默认 {DEFAULT_TAG})")
     ap.add_argument("--all", action="store_true", help="同时下载 PyTorch/ONNX 训练与独立推理权重")
@@ -96,7 +96,6 @@ def main():
     ckpt_dir.mkdir(parents=True, exist_ok=True)
     dist_dir.mkdir(parents=True, exist_ok=True)
 
-    # Optional checksum verification
     sums = {}
     try:
         sums_p = fetch_asset("SHA256SUMS.txt", args.repo, args.tag, cache_dir, args.local_dir)
@@ -121,7 +120,7 @@ def main():
                 raise RuntimeError(f"SHA256 校验失败: {name} (got={got}, expected={sums[name]})")
             print(f"  [OK ] SHA256 verified: {name}", flush=True)
 
-        if name == "shizi-v10-web-models.tar.gz":
+        if name.endswith("-web-models.tar.gz"):
             print(f"  [EXT] 解压 Web 运行时模型包 -> {dist_dir}", flush=True)
             with tarfile.open(p, "r:gz") as tf:
                 tf.extractall(dist_dir, filter="data")

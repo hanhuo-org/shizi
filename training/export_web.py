@@ -213,7 +213,12 @@ def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
     args.out_onnx.parent.mkdir(parents=True, exist_ok=True)
     model, _ = load_glyph_model(args.ckpt, device=device)
-    min_cos = export_wo_u8_opset17(model, args.out_onnx)
+    if hasattr(model, "arch"):
+        from training.model_v12 import export_v12_wo_u8_opset17
+
+        min_cos = export_v12_wo_u8_opset17(model, args.out_onnx)
+    else:
+        min_cos = export_wo_u8_opset17(model, args.out_onnx)
     assert min_cos > 0.990, f"ONNX parity check failed: {min_cos}"
     if args.onnx_only:
         return

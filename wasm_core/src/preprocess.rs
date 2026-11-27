@@ -65,15 +65,19 @@ fn extract_glyph_canvas_internal(img: &DynamicImage, user_cropped: bool) -> (Gra
     let rgb = img.to_rgb8();
     let (w, h) = rgb.dimensions();
 
-    // 1) 彩色描漆检测: 保留全部 d > 30 像素以防腐蚀细描漆笔画；
-    //    同时严格要求彩色像素必须真正集中在图像中心核心区 [15%..85%]（core_frac >= 0.025 且 col_in_core_ratio >= 0.45），
-    //    彻底排除四周红框/截图红边/角落小红印章误触发描漆通道导致整张灰度拓片被丢弃！
+    // 1) CIE-Lab a* 朱砂/红印泥专通道 + 彩色描漆检测:
+    //    - 先计算精确的红绿对立轴 a*（黄纸/发黄竹简 a* 接近 0，不误触；褪色朱砂红印 a* > 15 仍清晰分离！）
+    //    - 支持「朱文印（红字白/黄底）」与「白文印（红底白字满白印，核心区红占比 52%..88%）」自动双极性提取！
+    //    - 非红色彩色描漆（蓝/绿/金漆）继续走原高饱和度分支（要求 core_frac >= 0.025 & col_in_core_ratio >= 0.45）
     let mut colored = ImageBuffer::from_pixel(w, h, Luma([0u8]));
     let mut colored_cnt = 0usize;
     let mut core_colored_cnt = 0usize;
     let mut sat_sum = 0.0f32;
     let mut border_colored_cnt = 0usize;
     let mut border_total = 0usize;
+    let mut a_vals = vec![0u8; (w * h) as usize];
+    let mut red_cnt = 0usize;
+    let mut core_red_cnt = 0usize;
     let cx0 = (w as f32 * 0.15) as u32;
     let cx1 = (w as f32 * 0.85) as u32;
     let cy0 = (h as f32 * 0.15) as u32;
@@ -85,13 +89,22 @@ fn extract_glyph_canvas_internal(img: &DynamicImage, user_cropped: bool) -> (Gra
         let mn = r.min(g).min(b);
         let d = mx - mn;
         let is_border = x == 0 || y == 0 || x + 1 == w || y + 1 == h;
+        let in_core = x >= cx0 && x < cx1 && y >= cy0 && y < cy1;
         if is_border {
             border_total += 1;
+        }
+        let a_star = rgb_to_lab_a(p[0], p[1], p[2]);
+        a_vals[(y * w + x) as usize] = (a_star + 128.0).clamp(0.0, 255.0) as u8;
+        if a_star > 15.0 && (r - g) > 14 && (r - b) > 10 {
+            red_cnt += 1;
+            if in_core {
+                core_red_cnt += 1;
+            }
         }
         if d > 30 {
             colored.put_pixel(x, y, Luma([255u8]));
             colored_cnt += 1;
-            if x >= cx0 && x < cx1 && y >= cy0 && y < cy1 {
+            if in_core {
                 core_colored_cnt += 1;
             }
             sat_sum += d as f32 / (mx.max(1) as f32);
@@ -106,14 +119,54 @@ fn extract_glyph_canvas_internal(img: &DynamicImage, user_cropped: bool) -> (Gra
     let mean_sat = if colored_cnt > 0 { sat_sum / colored_cnt as f32 } else { 0.0 };
     let border_colored_frac = border_colored_cnt as f32 / border_total.max(1) as f32;
 
-    let used_lacquer = frac > 0.02
+    let red_frac = red_cnt as f32 / (w * h) as f32;
+    let core_red_frac = core_red_cnt as f32 / core_area as f32;
+    let red_in_core_ratio = core_red_cnt as f32 / red_cnt.max(1) as f32;
+
+    // 优先尝试 CIE-Lab a* 红印泥提取（抗黄纸/竹简色偏，同时支持朱文印与白文满白印）
+    let mut used_red_seal = false;
+    let mut bw_opt: Option<GrayImage> = None;
+    if red_frac > 0.025 && core_red_frac >= 0.03 && red_in_core_ratio >= 0.42 && border_colored_frac < 0.85 {
+        let otsu_a = otsu_threshold_u8(&a_vals);
+        if otsu_a > 136 {
+            let mut core_hi = 0usize;
+            for y in cy0..cy1 {
+                for x in cx0..cx1 {
+                    if a_vals[(y * w + x) as usize] >= otsu_a {
+                        core_hi += 1;
+                    }
+                }
+            }
+            let core_hi_frac = core_hi as f32 / core_area as f32;
+            if core_hi_frac >= 0.025 && core_hi_frac <= 0.88 {
+                let is_baiwen = core_hi_frac > 0.52; // 白文印：红底白字 -> 非红即笔画
+                let mut mask = vec![0u8; (w * h) as usize];
+                for i in 0..mask.len() {
+                    let is_r = a_vals[i] >= otsu_a;
+                    mask[i] = if is_baiwen { if !is_r { 255 } else { 0 } } else { if is_r { 255 } else { 0 } };
+                }
+                if !is_baiwen {
+                    morph_close(&mut mask, w, h, if w.min(h) >= 96 { 2 } else { 1 });
+                }
+                bw_opt = Some(ImageBuffer::from_fn(w, h, |x, y| {
+                    Luma([if mask[(y * w + x) as usize] > 0 { 0 } else { 255 }])
+                }));
+                used_red_seal = true;
+            }
+        }
+    }
+
+    let used_lacquer = !used_red_seal
+        && frac > 0.02
         && frac < 0.60
         && core_frac >= 0.025
         && col_in_core_ratio >= 0.45
         && border_colored_frac < 0.45
         && mean_sat >= 0.24;
     let bw: GrayImage; // 255=白(背景) 0=黑(笔画)
-    if used_lacquer {
+    if let Some(red_bw) = bw_opt {
+        bw = red_bw;
+    } else if used_lacquer {
         // 描漆: 彩色即笔画, 闭运算连接断裂
         let mut mask = vec![0u8; (w * h) as usize];
         for y in 0..h {
@@ -137,10 +190,12 @@ fn extract_glyph_canvas_internal(img: &DynamicImage, user_cropped: bool) -> (Gra
         } else {
             gray
         };
-        // 按图像尺寸自适应放大局部均值窗口（积分图 O(1) 零额外耗时），确保高分辨率照片里的粗笔画保持 100% 实心
+        // 大幅手机翻拍图光照不均时做温和背景平滑去阴影（仅在 min(w,h) >= 240 且光照跨度 > 48 时启用，不伤棚录净图）
+        let gray_flat = flatten_uneven_lighting(&gray_norm);
+        // 按图像尺寸自适应放大局部均值窗口 + Hybrid Sauvola 局部方差抑制石花/纸纹噪点（积分图 O(1)）
         let blk = ((w.min(h) / 3) | 1).clamp(35, 161);
         let c_thr = if is_white_on_black { 18.0 } else { 12.0 };
-        let bin = adaptive_threshold(&gray_norm, blk, c_thr);
+        let bin = sauvola_hybrid_threshold(&gray_flat, blk, c_thr, 0.25);
         bw = ImageBuffer::from_fn(w, h, |x, y| {
             Luma([if bin[(y * w + x) as usize] == 0 { 0 } else { 255 }])
         });
@@ -537,13 +592,16 @@ pub fn extract_tight_char_box_canvases(
         return (GrayImage::from_pixel(256, 256, Luma([255u8])), None, 1.0);
     }
 
-    // 1) 彩色描漆检测: 同单字入口，要求彩色像素真正集中在中心核心区 [15%..85%]，防止边缘红框/小红印章误触发描漆反色
+    // 1) CIE-Lab a* 红印泥专通道 + 彩色描漆检测: 抗黄纸/竹简色偏，同时支持朱文与白文印！
     let mut colored = vec![0u8; (w * h) as usize];
     let mut colored_cnt = 0usize;
     let mut core_colored_cnt = 0usize;
     let mut sat_sum = 0.0f32;
     let mut border_colored_cnt = 0usize;
     let mut border_total = 0usize;
+    let mut a_vals = vec![0u8; (w * h) as usize];
+    let mut red_cnt = 0usize;
+    let mut core_red_cnt = 0usize;
     let cx0 = (w as f32 * 0.15) as u32;
     let cx1 = (w as f32 * 0.85) as u32;
     let cy0 = (h as f32 * 0.15) as u32;
@@ -555,13 +613,22 @@ pub fn extract_tight_char_box_canvases(
         let mn = r.min(g).min(b);
         let d = mx - mn;
         let is_border = x == 0 || y == 0 || x + 1 == w || y + 1 == h;
+        let in_core = x >= cx0 && x < cx1 && y >= cy0 && y < cy1;
         if is_border {
             border_total += 1;
+        }
+        let a_star = rgb_to_lab_a(p[0], p[1], p[2]);
+        a_vals[(y * w + x) as usize] = (a_star + 128.0).clamp(0.0, 255.0) as u8;
+        if a_star > 15.0 && (r - g) > 14 && (r - b) > 10 {
+            red_cnt += 1;
+            if in_core {
+                core_red_cnt += 1;
+            }
         }
         if d > 32 {
             colored[(y * w + x) as usize] = 255;
             colored_cnt += 1;
-            if x >= cx0 && x < cx1 && y >= cy0 && y < cy1 {
+            if in_core {
                 core_colored_cnt += 1;
             }
             sat_sum += d as f32 / (mx.max(1) as f32);
@@ -576,8 +643,44 @@ pub fn extract_tight_char_box_canvases(
     let mean_sat = if colored_cnt > 0 { sat_sum / colored_cnt as f32 } else { 0.0 };
     let border_colored_frac = border_colored_cnt as f32 / border_total.max(1) as f32;
 
+    let red_frac = red_cnt as f32 / (w * h) as f32;
+    let core_red_frac = core_red_cnt as f32 / core_area as f32;
+    let red_in_core_ratio = core_red_cnt as f32 / red_cnt.max(1) as f32;
+
+    let mut fg_opt: Option<GrayImage> = None;
+    if red_frac > 0.025 && core_red_frac >= 0.03 && red_in_core_ratio >= 0.42 && border_colored_frac < 0.85 {
+        let otsu_a = otsu_threshold_u8(&a_vals);
+        if otsu_a > 136 {
+            let mut core_hi = 0usize;
+            for y in cy0..cy1 {
+                for x in cx0..cx1 {
+                    if a_vals[(y * w + x) as usize] >= otsu_a {
+                        core_hi += 1;
+                    }
+                }
+            }
+            let core_hi_frac = core_hi as f32 / core_area as f32;
+            if core_hi_frac >= 0.025 && core_hi_frac <= 0.88 {
+                let is_baiwen = core_hi_frac > 0.52;
+                let mut mask = vec![0u8; (w * h) as usize];
+                for i in 0..mask.len() {
+                    let is_r = a_vals[i] >= otsu_a;
+                    mask[i] = if is_baiwen { if !is_r { 255 } else { 0 } } else { if is_r { 255 } else { 0 } };
+                }
+                if !is_baiwen {
+                    morph_close(&mut mask, w, h, if w.min(h) >= 48 { 2 } else { 1 });
+                }
+                fg_opt = Some(ImageBuffer::from_fn(w, h, |x, y| {
+                    Luma([if mask[(y * w + x) as usize] > 0 { 0 } else { 255 }])
+                }));
+            }
+        }
+    }
+
     let mut fg: GrayImage;
-    if frac > 0.025 && frac < 0.65 && core_frac >= 0.025 && col_in_core_ratio >= 0.45 && border_colored_frac < 0.45 && mean_sat >= 0.24 {
+    if let Some(red_fg) = fg_opt {
+        fg = red_fg;
+    } else if frac > 0.025 && frac < 0.65 && core_frac >= 0.025 && col_in_core_ratio >= 0.45 && border_colored_frac < 0.45 && mean_sat >= 0.24 {
         let r_close = if w.min(h) >= 48 { 2 } else { 1 };
         morph_close(&mut colored, w, h, r_close);
         fg = ImageBuffer::from_fn(w, h, |x, y| {
@@ -585,9 +688,6 @@ pub fn extract_tight_char_box_canvases(
         });
     } else {
         let gray = img.to_luma8();
-        // 任何单个汉字在紧致字框内的笔画占比永远 < 48%，背景永远占 > 52%：
-        // 直接取框内全部像素的中位数（p50）判定极性，既不怕笔画紧贴字框四边（如「九」），
-        // 也不受拓片外圈白纸页边干扰（如角落里的「永」「之」「事」）！
         let _ = bg_luma_hint;
         let mut hist = [0u32; 256];
         for p in gray.pixels() {
@@ -611,7 +711,7 @@ pub fn extract_tight_char_box_canvases(
             gray
         };
         let blk = ((w.min(h) / 2) | 1).clamp(17, 55);
-        let bin = adaptive_threshold(&gray_norm, blk, 12.0);
+        let bin = sauvola_hybrid_threshold(&gray_norm, blk, 12.0, 0.25);
         fg = ImageBuffer::from_fn(w, h, |x, y| {
             Luma([if bin[(y * w + x) as usize] == 0 { 0 } else { 255 }])
         });
@@ -662,7 +762,171 @@ fn center_crop_224(img: &GrayImage) -> GrayImage {
     img.view(off, off, 224, 224).to_image()
 }
 
+/// 快速 sRGB -> CIE-Lab a* 红绿对立轴（正值=红/朱砂，0=灰/黄纸，负值=绿）
+#[inline]
+fn rgb_to_lab_a(r_u8: u8, g_u8: u8, b_u8: u8) -> f32 {
+    #[inline]
+    fn lin(v: u8) -> f32 {
+        let x = v as f32 / 255.0;
+        if x <= 0.04045 { x / 12.92 } else { ((x + 0.055) / 1.055).powf(2.4) }
+    }
+    #[inline]
+    fn f_lab(t: f32) -> f32 {
+        if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16.0 / 116.0 }
+    }
+    let r = lin(r_u8);
+    let g = lin(g_u8);
+    let b = lin(b_u8);
+    let x = (0.4124564 * r + 0.3575761 * g + 0.1804375 * b) / 0.95047;
+    let y = 0.2126729 * r + 0.7151522 * g + 0.0721750 * b;
+    500.0 * (f_lab(x) - f_lab(y))
+}
+
+/// 一维 u8 通道 Otsu 大津阈值：在最大类间方差对应的双峰处取两类均值中点，
+/// 避免纯双色图（无中间灰度）时退化到低峰左边界导致阈值偏低！
+fn otsu_threshold_u8(vals: &[u8]) -> u8 {
+    if vals.is_empty() {
+        return 128;
+    }
+    let mut hist = [0u64; 256];
+    for &v in vals {
+        hist[v as usize] += 1;
+    }
+    let total = vals.len() as f64;
+    let mut sum_all = 0.0f64;
+    for (i, &c) in hist.iter().enumerate() {
+        sum_all += (i as f64) * (c as f64);
+    }
+    let mut w_b = 0.0f64;
+    let mut sum_b = 0.0f64;
+    let mut best_var = -1.0f64;
+    let mut best_t = 128u8;
+    for i in 0..255usize {
+        w_b += hist[i] as f64;
+        if w_b == 0.0 { continue; }
+        let w_f = total - w_b;
+        if w_f == 0.0 { break; }
+        sum_b += (i as f64) * (hist[i] as f64);
+        let m_b = sum_b / w_b;
+        let m_f = (sum_all - sum_b) / w_f;
+        let diff = m_b - m_f;
+        let var = w_b * w_f * diff * diff;
+        if var > best_var {
+            best_var = var;
+            best_t = ((m_b + m_f) * 0.5).round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    best_t
+}
+
+/// 大幅照片光照不均去阴影（仅在 min(w,h) >= 240 且背景动态跨度 > 48 时启用，不伤净图与小裁剪框）
+fn flatten_uneven_lighting(gray: &GrayImage) -> GrayImage {
+    let (w, h) = gray.dimensions();
+    if w.min(h) < 240 {
+        return gray.clone();
+    }
+    let stride = (w + 1) as usize;
+    let mut int1 = vec![0u64; stride * (h + 1) as usize];
+    let mut int2 = vec![0u64; stride * (h + 1) as usize];
+    for y in 0..h {
+        let (mut r1, mut r2) = (0u64, 0u64);
+        for x in 0..w {
+            let v = gray.get_pixel(x, y)[0] as u64;
+            r1 += v;
+            r2 += v * v;
+            let cur = (y + 1) as usize * stride + (x + 1) as usize;
+            let up = y as usize * stride + (x + 1) as usize;
+            int1[cur] = int1[up] + r1;
+            int2[cur] = int2[up] + r2;
+        }
+    }
+    let blk = ((w.min(h) / 2) | 1).clamp(65, 181);
+    let r = blk / 2;
+    let mut bg_min = 255.0f32;
+    let mut bg_max = 0.0f32;
+    // 抽样估计背景光照极差
+    let step = (w.min(h) / 24).max(4);
+    for y in (0..h).step_by(step as usize) {
+        let y0 = y.saturating_sub(r);
+        let y1 = (y + r).min(h - 1);
+        for x in (0..w).step_by(step as usize) {
+            let x0 = x.saturating_sub(r);
+            let x1 = (x + r).min(w - 1);
+            let area = ((x1 - x0 + 1) * (y1 - y0 + 1)) as f32;
+            let s1 = int1[(y1 + 1) as usize * stride + (x1 + 1) as usize]
+                + int1[y0 as usize * stride + x0 as usize]
+                - int1[(y1 + 1) as usize * stride + x0 as usize]
+                - int1[y0 as usize * stride + (x1 + 1) as usize];
+            let m = s1 as f32 / area;
+            if m < bg_min { bg_min = m; }
+            if m > bg_max { bg_max = m; }
+        }
+    }
+    if bg_max - bg_min <= 48.0 {
+        return gray.clone();
+    }
+    ImageBuffer::from_fn(w, h, |x, y| {
+        let y0 = y.saturating_sub(r);
+        let y1 = (y + r).min(h - 1);
+        let x0 = x.saturating_sub(r);
+        let x1 = (x + r).min(w - 1);
+        let area = ((x1 - x0 + 1) * (y1 - y0 + 1)) as f32;
+        let i11 = (y1 + 1) as usize * stride + (x1 + 1) as usize;
+        let i00 = y0 as usize * stride + x0 as usize;
+        let i10 = (y1 + 1) as usize * stride + x0 as usize;
+        let i01 = y0 as usize * stride + (x1 + 1) as usize;
+        let mu = (int1[i11] + int1[i00] - int1[i10] - int1[i01]) as f32 / area;
+        let e2 = (int2[i11] + int2[i00] - int2[i10] - int2[i01]) as f32 / area;
+        let sd = (e2 - mu * mu).max(0.0).sqrt();
+        let est_bg = (mu + 0.8 * sd).clamp(60.0, 255.0);
+        let v = (gray.get_pixel(x, y)[0] as f32 * (240.0 / est_bg)).clamp(0.0, 255.0) as u8;
+        Luma([v])
+    })
+}
+
+/// Hybrid Sauvola 双积分图自适应阈值：高对比笔画区保细笔画，低方差石花/纸纹背景区自动抬高门限抑制黑斑
+fn sauvola_hybrid_threshold(gray: &GrayImage, block: u32, c: f32, k_s: f32) -> Vec<u8> {
+    let (w, h) = gray.dimensions();
+    let stride = (w + 1) as usize;
+    let mut int1 = vec![0u64; stride * (h + 1) as usize];
+    let mut int2 = vec![0u64; stride * (h + 1) as usize];
+    for y in 0..h {
+        let (mut r1, mut r2) = (0u64, 0u64);
+        for x in 0..w {
+            let v = gray.get_pixel(x, y)[0] as u64;
+            r1 += v;
+            r2 += v * v;
+            let cur = (y + 1) as usize * stride + (x + 1) as usize;
+            let up = y as usize * stride + (x + 1) as usize;
+            int1[cur] = int1[up] + r1;
+            int2[cur] = int2[up] + r2;
+        }
+    }
+    let r = block / 2;
+    let mut out = vec![255u8; (w * h) as usize];
+    for y in 0..h {
+        let y0 = y.saturating_sub(r);
+        let y1 = (y + r).min(h - 1);
+        for x in 0..w {
+            let x0 = x.saturating_sub(r);
+            let x1 = (x + r).min(w - 1);
+            let area = ((x1 - x0 + 1) * (y1 - y0 + 1)) as f32;
+            let i11 = (y1 + 1) as usize * stride + (x1 + 1) as usize;
+            let i00 = y0 as usize * stride + x0 as usize;
+            let i10 = (y1 + 1) as usize * stride + x0 as usize;
+            let i01 = y0 as usize * stride + (x1 + 1) as usize;
+            let mu = (int1[i11] + int1[i00] - int1[i10] - int1[i01]) as f32 / area;
+            let e2 = (int2[i11] + int2[i00] - int2[i10] - int2[i01]) as f32 / area;
+            let sd = (e2 - mu * mu).max(0.0).sqrt();
+            let c_adapt = c + k_s * (48.0 - sd).max(0.0);
+            out[(y * w + x) as usize] = if (gray.get_pixel(x, y)[0] as f32) < mu - c_adapt { 0 } else { 255 };
+        }
+    }
+    out
+}
+
 /// 积分图 box 均值自适应阈值, 返回 0/255
+#[allow(dead_code)]
 fn adaptive_threshold(gray: &GrayImage, block: u32, c: f32) -> Vec<u8> {
     let (w, h) = gray.dimensions();
     let mut integral = vec![0u64; (w + 1) as usize * (h + 1) as usize];

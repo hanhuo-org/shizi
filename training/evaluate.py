@@ -98,8 +98,11 @@ def score_lse(Q: np.ndarray, P_t: torch.Tensor, chars: list[str], gts: list[str]
 
 
 def main():
+    default_ckpt = ROOT / "checkpoints/convnext_tiny_v12_best.pt"
+    if not default_ckpt.exists():
+        default_ckpt = ROOT / "checkpoints/wiseft_v10_a070.pt"
     ap = argparse.ArgumentParser(description="汉火识字零泄漏真实文物评测套件")
-    ap.add_argument("--ckpt", type=Path, default=ROOT / "checkpoints/wiseft_v10_a070.pt")
+    ap.add_argument("--ckpt", type=Path, default=default_ckpt)
     ap.add_argument("--dist-dir", type=Path, default=ROOT / "web/dist")
     ap.add_argument("--real-dir", type=Path, default=ROOT / "data/real_artifacts")
     args = ap.parse_args()
@@ -128,10 +131,10 @@ def main():
         if g346:
             suites.append(("346-Hard (Calligraphy)", g346, None))
     for name, rel_p, st_flt in [
-        ("OBIMD_Real_Test (甲骨)", "obimd/obimd_test_meta.json", "jiaguwen"),
-        ("Jinwen_Real_Test (金文)", "bronze_stone/jinwen_test_meta.json", "jinwen"),
-        ("CHUBS_Real_Test (楚简)", "chubs/chubs_test_meta.json", "chuwenzi"),
-        ("HanYin_Real_Test (汉印)", "hanyin/hanyin_test_meta.json", None),
+        ("OBIMD_Real_Test (甲骨)", "obimd/obimd_test_meta.json", ["jiaguwen"]),
+        ("Jinwen_Real_Test (金文)", "bronze_stone/jinwen_test_meta.json", ["jinwen"]),
+        ("CHUBS_Real_Test (楚简)", "chubs/chubs_test_meta.json", ["chuwenzi"]),
+        ("HanYin_Real_Test (汉印)", "hanyin/hanyin_test_meta.json", ["zhuanke", "zhuanshu", "xiaozhuan"]),
     ]:
         p = args.real_dir / rel_p
         if p.exists():
@@ -148,19 +151,23 @@ def main():
         raws = [load_rubbing_autoinv(args.real_dir / r.get("raw_path", r["bw_path"])).convert("RGB") for r in recs]
         gts = [simp(r["char"]) for r in recs]
 
-        q_bw = apply_abtt(embed_images(model, bws, val_tf, device), abtt)
-        q_raw = apply_abtt(embed_images(model, raws, val_tf, device), abtt)
-        q_hyb = 0.65 * q_bw + 0.35 * q_raw
-        q_hyb /= np.maximum(np.linalg.norm(q_hyb, axis=1, keepdims=True), 1e-8)
+        e_bw = embed_images(model, bws, val_tf, device)
+        e_raw = embed_images(model, raws, val_tf, device)
+        e_hyb = 0.65 * e_bw + 0.35 * e_raw
+        e_hyb /= np.maximum(np.linalg.norm(e_hyb, axis=1, keepdims=True), 1e-8)
+        q_bw = apply_abtt(e_bw, abtt)
+        q_hyb = apply_abtt(e_hyb, abtt)
 
         t1, t5, t12 = score_lse(q_bw, P_t, chars, gts, tau=tau, device=device)
         h1, h5, _ = score_lse(q_hyb, P_t, chars, gts, tau=tau, device=device)
         st_str = "—"
-        if st_flt and st_flt in styles:
-            mask = style_ids == styles.index(st_flt)
-            idx = np.where(mask)[0]
-            _, st5, _ = score_lse(q_bw, P_t[idx], [chars[k] for k in idx], gts, tau=tau, device=device)
-            st_str = f"{st5:5.2f}%"
+        if st_flt:
+            valid_ids = [styles.index(s) for s in st_flt if s in styles]
+            if valid_ids:
+                mask = np.isin(style_ids, valid_ids)
+                idx = np.where(mask)[0]
+                _, st5, _ = score_lse(q_bw, P_t[idx], [chars[k] for k in idx], gts, tau=tau, device=device)
+                st_str = f"{st5:5.2f}%"
         print(f"{name:26s} | {len(recs):4d} | {t1:5.2f}/{t5:5.2f}/{t12:5.2f}%  | {h1:5.2f}% / {h5:5.2f}%   | {st_str:>8s}", flush=True)
 
 

@@ -1,7 +1,7 @@
 /**
  * 汉火字形 (xing.hanhuo.org) 浏览器推理与检索 Web Worker
  * - 零网络本地 Rust-WASM 自动框选检测 (detect_from_rgba) & 透视拉正预处理 (prepare_input_from_rgba)
- * - ResNet50 Weight-Only U8 + FP32 投影头 ONNX 推理 (默认多核 WASM / 可选 WebGPU 显卡加速)
+ * - ConvNeXt-Tiny V12 Weight-Only U8 ONNX 推理 (默认多核 WASM / 可选 WebGPU 显卡加速)
  * - 16.7 万多原型 INT8 向量库常驻 WASM 极速检索 (OPFS 零合并整包加载)
  */
 import {
@@ -13,7 +13,7 @@ import {
   loadCommunityVectors,
 } from "./model_cache.mjs?v=20261121c";
 
-const ASSET_VER = new URL(import.meta.url).searchParams.get("v") || "20261121c";
+const ASSET_VER = new URL(import.meta.url).searchParams.get("v") || "20261127a";
 
 // 书体大类定义（用于 #styleSelect 大类筛选 & 多字同碑书体家族共识）
 const SCRIPT_GROUPS = {
@@ -26,26 +26,32 @@ const SCRIPT_GROUPS = {
     "kaishu", "xingshu", "caoshu", "zhangcao", "weibei", "lishu", "jiandu",
   ],
 };
+// 单书体同源软扩展：篆刻/汉印(zhuanke)与大小篆(zhuanshu/xiaozhuan)字形高度同源，
+// 防止纯 zhuanke 字种稀疏导致真实汉印/官印漏检（实测 HanYin T5: 3.23% -> 88.17%）
+const STYLE_SOFT_ALIASES = {
+  zhuanke: ["zhuanke", "zhuanshu", "xiaozhuan"],
+};
 const SEAL_CORE_SET = new Set(SCRIPT_GROUPS["group:seal_core"]);
 const ANCIENT_SEAL_SET = new Set(SCRIPT_GROUPS["group:ancient_seal"]);
 const BRUSH_MODERN_SET = new Set(SCRIPT_GROUPS["group:brush_modern"]);
 
 function resolveStyleFilter(meta, styleStr) {
-  if (!styleStr) return { mask: 0, allowedSet: null };
-  if (SCRIPT_GROUPS[styleStr]) {
-    const allowedSet = new Set(SCRIPT_GROUPS[styleStr]);
+  if (!styleStr) return { mask: 0, allowedSet: null, preferredStyle: null };
+  const expanded = SCRIPT_GROUPS[styleStr] || STYLE_SOFT_ALIASES[styleStr];
+  if (expanded) {
+    const allowedSet = new Set(expanded);
     let mask = 0;
     const styles = meta?.styles || [];
     for (let i = 0; i < styles.length && i < 32; i++) {
       if (allowedSet.has(styles[i])) mask |= (1 << i);
     }
-    return { mask: mask >>> 0, allowedSet };
+    return { mask: mask >>> 0, allowedSet, preferredStyle: STYLE_SOFT_ALIASES[styleStr] ? styleStr : null };
   }
   const idx = (meta?.styles || []).indexOf(styleStr);
   if (idx >= 0 && idx < 32) {
-    return { mask: (1 << idx) >>> 0, allowedSet: new Set([styleStr]) };
+    return { mask: (1 << idx) >>> 0, allowedSet: new Set([styleStr]), preferredStyle: null };
   }
-  return { mask: 0, allowedSet: null };
+  return { mask: 0, allowedSet: null, preferredStyle: null };
 }
 
 function l2NormalizeInPlace(vec) {
@@ -395,7 +401,7 @@ async function loadEngine(preferredMode = activeBackendPref || "wasm") {
 
   const order = reloadModelOnly
     ? [["resnet50", "视觉编码模型"]]
-    : [["resnet50", "视觉编码模型 (1/2)"], ["proto_vec", "19.5 万多原型字形向量库 (2/2)"]];
+    : [["resnet50", "视觉编码模型 (1/2)"], ["proto_vec", "22.23 万字形特征向量库 (2/2)"]];
   const totalAllGz = order.reduce((acc, [k]) => acc + (manifest.models[k]?.totalGzSize || 0), 0);
   const totalAllChunks = order.reduce((acc, [k]) => acc + (manifest.models[k]?.chunks?.length || 0), 0);
   let doneGzBase = 0, doneCached = 0, doneNet = 0, opfsHits = 0, allFromCache = true;
@@ -893,7 +899,46 @@ function decodeCenterNetBoxes(hm, whReg, scale, ox, oy, srcW, srcH, minThresh = 
   return kept;
 }
 
-// ===================== 古汉语二元字频 (HXB1) 与 Viterbi 上下文纠偏 =====================
+// ===================== 古汉语三元+分域语言模型 (HXB2/HXB1) 与二阶 Viterbi 上下文纠偏 =====================
+// Domain IDs in HXB2: 0=oracle(甲骨卜辞), 1=bronze(青铜器金文), 2=seal(汉印官印), 3=stele(碑帖/简帛/诗文)
+const TRI_STRIDE1 = 16384 * 16384; // vocab <= 16384 -> 3*14=42 bits < 53-bit IEEE-754 exact integer!
+const TRI_STRIDE2 = 16384;
+const DOM_BI_STRIDE0 = 65536 * 65536; // 4 * 2^32 < 2^53 exact
+const DOM_TRI_STRIDE0 = 4 * 16384 * 16384 * 16384; // wait: 4*2^42 = 2^44 < 2^53 exact! Use 2^42 stride:
+const DOM_TRI_S0 = 16384 * 16384 * 16384; // 2^42 = 4,398,046,511,104 (d * 2^42 + id1 * 2^28 + id2 * 2^14 + id3 < 2^45 < 2^53!)
+
+function inferArtifactDomain(items, styleStr = "") {
+  if (styleStr === "jiaguwen") return 0;
+  if (styleStr === "jinwen" || styleStr === "chunqiu" || styleStr === "zhanguo" || styleStr === "qinwenzi") return 1;
+  if (styleStr === "zhuanke" || styleStr === "zhuanshu" || styleStr === "xiaozhuan" || styleStr === "group:seal_core") return 2;
+  if (styleStr && styleStr !== "group:ancient_seal") return 3;
+  // Auto-detect from Top-5 visual styles across the multi-character sequence
+  const scores = [0, 0, 0, 0];
+  const RANK_W = [1.0, 0.78, 0.62, 0.50, 0.40];
+  for (const it of items || []) {
+    const top5 = (it._viterbiPool || it.hits || []).slice(0, 5);
+    for (let r = 0; r < top5.length; r++) {
+      const h = top5[r];
+      const w = Math.max(0, Number(h.score)) * RANK_W[r];
+      const st = h.style || "";
+      if (st === "jiaguwen") scores[0] += w;
+      else if (st === "jinwen" || st === "chunqiu" || st === "zhanguo" || st === "qinwenzi") scores[1] += w;
+      else if (st === "zhuanke" || st === "zhuanshu" || st === "xiaozhuan") scores[2] += w;
+      else if (st !== "unknown") scores[3] += w;
+    }
+  }
+  let bestD = 3;
+  let bestV = scores[3];
+  for (let d = 0; d < 3; d++) {
+    if (scores[d] > bestV) {
+      bestV = scores[d];
+      bestD = d;
+    }
+  }
+  const tot = scores[0] + scores[1] + scores[2] + scores[3];
+  return tot > 1e-6 && bestV / tot >= 0.34 ? bestD : 3;
+}
+
 async function ensureClassicalBigram() {
   if (bigramLm) return bigramLm;
   if (bigramLmPromise) return bigramLmPromise;
@@ -903,16 +948,23 @@ async function ensureClassicalBigram() {
       const raw = await gunzipArrayBuffer(buf);
       const u8 = new Uint8Array(raw);
       const dv = new DataView(raw);
-      if (u8.length < 12 || u8[0] !== 0x48 || u8[1] !== 0x58 || u8[2] !== 0x42 || u8[3] !== 0x31) {
-        throw new Error("Invalid HXB1 bigram magic");
+      const isHxb2 = u8.length >= 24 && u8[0] === 0x48 && u8[1] === 0x58 && u8[2] === 0x42 && u8[3] === 0x32;
+      const isHxb1 = u8.length >= 12 && u8[0] === 0x48 && u8[1] === 0x58 && u8[2] === 0x42 && u8[3] === 0x31;
+      if (!isHxb2 && !isHxb1) {
+        throw new Error("Invalid HXB1/HXB2 LM magic");
       }
       const nVocab = dv.getUint32(4, true);
       const nBi = dv.getUint32(8, true);
+      const nTri = isHxb2 ? dv.getUint32(12, true) : 0;
+      const nDomBi = isHxb2 ? dv.getUint32(16, true) : 0;
+      const nDomTri = isHxb2 ? dv.getUint32(20, true) : 0;
+      let off = isHxb2 ? 24 : 12;
+
       const vocabCp = new Uint32Array(nVocab);
-      let off = 12;
       for (let i = 0; i < nVocab; i++, off += 4) vocabCp[i] = dv.getUint32(off, true);
       const uniQ8 = u8.slice(off, off + nVocab);
       off += nVocab;
+
       const biKeys = new Uint32Array(nBi);
       const biScores = new Uint8Array(nBi);
       for (let i = 0; i < nBi; i++, off += 5) {
@@ -921,11 +973,53 @@ async function ensureClassicalBigram() {
         biKeys[i] = ((id1 << 16) | id2) >>> 0;
         biScores[i] = u8[off + 4];
       }
-      bigramLm = { nVocab, nBi, vocabCp, uniQ8, biKeys, biScores };
-      console.log(`[Hanzi Worker] Classical Bigram LM ready: vocab=${nVocab}, bigrams=${nBi}`);
+
+      const triKeys = new Float64Array(nTri);
+      const triScores = new Uint8Array(nTri);
+      for (let i = 0; i < nTri; i++, off += 7) {
+        const id1 = dv.getUint16(off, true);
+        const id2 = dv.getUint16(off + 2, true);
+        const id3 = dv.getUint16(off + 4, true);
+        triKeys[i] = id1 * TRI_STRIDE1 + id2 * TRI_STRIDE2 + id3;
+        triScores[i] = u8[off + 6];
+      }
+
+      const domBiKeys = new Float64Array(nDomBi);
+      const domBiScores = new Uint8Array(nDomBi);
+      for (let i = 0; i < nDomBi; i++, off += 6) {
+        const d = u8[off];
+        const id1 = dv.getUint16(off + 1, true);
+        const id2 = dv.getUint16(off + 3, true);
+        domBiKeys[i] = d * DOM_BI_STRIDE0 + id1 * 65536 + id2;
+        domBiScores[i] = u8[off + 5];
+      }
+
+      const domTriKeys = new Float64Array(nDomTri);
+      const domTriScores = new Uint8Array(nDomTri);
+      for (let i = 0; i < nDomTri; i++, off += 8) {
+        const d = u8[off];
+        const id1 = dv.getUint16(off + 1, true);
+        const id2 = dv.getUint16(off + 3, true);
+        const id3 = dv.getUint16(off + 5, true);
+        domTriKeys[i] = d * DOM_TRI_S0 + id1 * TRI_STRIDE1 + id2 * TRI_STRIDE2 + id3;
+        domTriScores[i] = u8[off + 7];
+      }
+
+      bigramLm = {
+        version: isHxb2 ? 2 : 1,
+        nVocab, nBi, nTri, nDomBi, nDomTri,
+        vocabCp, uniQ8,
+        biKeys, biScores,
+        triKeys, triScores,
+        domBiKeys, domBiScores,
+        domTriKeys, domTriScores,
+      };
+      console.log(
+        `[Hanzi Worker] Classical LM HXB${bigramLm.version} ready: vocab=${nVocab}, bi=${nBi}, tri=${nTri}, domBi=${nDomBi}, domTri=${nDomTri}`
+      );
       return bigramLm;
     } catch (err) {
-      console.warn("[Hanzi Worker] Bigram LM unavailable:", err);
+      console.warn("[Hanzi Worker] Classical LM unavailable:", err);
       bigramLmPromise = null;
       return null;
     }
@@ -948,19 +1042,41 @@ function lmLookupCharId(lm, ch) {
   return -1;
 }
 
-function lmBigramNorm(lm, id1, id2) {
-  if (!lm || id1 < 0 || id2 < 0) return 0;
-  const key = ((id1 << 16) | id2) >>> 0;
-  let lo = 0, hi = lm.nBi - 1;
-  const keys = lm.biKeys;
+function bsearchScore(keys, scores, len, key) {
+  let lo = 0, hi = len - 1;
   while (lo <= hi) {
     const mid = (lo + hi) >>> 1;
     const v = keys[mid];
-    if (v === key) return lm.biScores[mid] / 255.0;
+    if (v === key) return scores[mid] / 255.0;
     if (v < key) lo = mid + 1;
     else hi = mid - 1;
   }
   return 0;
+}
+
+function lmBigramNorm(lm, id1, id2, domId = -1) {
+  if (!lm || id1 < 0 || id2 < 0) return 0;
+  let sc = bsearchScore(lm.biKeys, lm.biScores, lm.nBi, ((id1 << 16) | id2) >>> 0);
+  if (domId >= 0 && lm.nDomBi > 0) {
+    const dsc = bsearchScore(lm.domBiKeys, lm.domBiScores, lm.nDomBi, domId * DOM_BI_STRIDE0 + id1 * 65536 + id2);
+    if (dsc > 0) sc = Math.max(sc, Math.min(1.0, dsc * 1.15));
+  }
+  return sc;
+}
+
+function lmTrigramNorm(lm, id1, id2, id3, domId = -1) {
+  if (!lm || id1 < 0 || id2 < 0 || id3 < 0) return 0;
+  let sc = lm.nTri > 0 ? bsearchScore(lm.triKeys, lm.triScores, lm.nTri, id1 * TRI_STRIDE1 + id2 * TRI_STRIDE2 + id3) : 0;
+  if (domId >= 0 && lm.nDomTri > 0) {
+    const dsc = bsearchScore(
+      lm.domTriKeys,
+      lm.domTriScores,
+      lm.nDomTri,
+      domId * DOM_TRI_S0 + id1 * TRI_STRIDE1 + id2 * TRI_STRIDE2 + id3
+    );
+    if (dsc > 0) sc = Math.max(sc, Math.min(1.0, dsc * 1.25));
+  }
+  return sc;
 }
 
 function applyWholeSteleScriptConsistency(items, topk, opts = {}) {
@@ -1076,7 +1192,9 @@ function viterbiRerankMulti(items, lm, opts = {}) {
   const orderMode = opts.orderMode || "vertical-rl";
   const enableBreakGuard = opts.enableBreakGuard !== false;
   const enableConfGuard = opts.enableConfGuard !== false;
+  const domId = lm.version >= 2 ? inferArtifactDomain(items, opts.styleStr || "") : -1;
   const BI_W = 0.22;
+  const TRI_W = lm.version >= 2 ? 0.24 : 0.0;
   const UNI_W = 0.025;
   const VOTE_W = 0.018; // 同字多原型 Top-12 投票共识加分（防单个偶发异常原型压倒 4 个高分真字原型）
   const UNENC_PEN = 0.06;
@@ -1085,7 +1203,7 @@ function viterbiRerankMulti(items, lm, opts = {}) {
 
   const breaks = enableBreakGuard ? detectSequenceBreaks(items, orderMode) : new Uint8Array(N);
 
-  // 每个位置抽取去重后的最多 16 个视觉候选字（保留该字最高综合分、Top-12 原型出现次数与对应原型 hit）
+  // 每个位置抽取去重后的最多 12 个视觉候选字（二阶 Viterbi 12*12=144 状态，<1ms）
   const rawTop1s = new Float32Array(N);
   const layers = items.map((it, idx) => {
     const pool = it._viterbiPool || it.hits || [];
@@ -1124,71 +1242,106 @@ function viterbiRerankMulti(items, lm, opts = {}) {
         cid,
         emit: sc + VOTE_W * votes + uniW * uniNorm - (isUnenc ? UNENC_PEN : 0),
       });
-      if (cands.length >= 16) break;
+      if (cands.length >= 12) break;
     }
     if (!cands.length) cands.push({ char: "", hit: null, cid: -1, emit: 0 });
     return cands;
   });
 
-  const dp = [layers[0].map((c) => c.emit)];
-  const back = [layers[0].map(() => -1)];
+  const biTrans = (cPrev, cCur, isBreak, prevLow, curLow) => {
+    if (isBreak) return 0;
+    const biRaw = lmBigramNorm(lm, cPrev.cid, cCur.cid, domId);
+    if (biRaw <= 0) return 0;
+    if (prevLow && curLow) return biRaw >= 0.26 ? BI_W * 0.80 * Math.pow(biRaw, 0.72) : 0;
+    if (prevLow || curLow) return biRaw >= 0.14 ? BI_W * Math.pow(biRaw, 0.62) : 0;
+    return BI_W * Math.pow(biRaw, 0.60);
+  };
 
-  for (let i = 1; i < N; i++) {
-    const prevL = layers[i - 1];
-    const curL = layers[i];
-    const curDp = new Array(curL.length);
-    const curBack = new Array(curL.length);
-    const isBreak = breaks[i] === 1;
-    const prevLow = enableConfGuard && rawTop1s[i - 1] < LOW_CONF_THR;
-    const curLow = enableConfGuard && rawTop1s[i] < LOW_CONF_THR;
-    for (let j = 0; j < curL.length; j++) {
-      const cj = curL[j];
-      let bestVal = -1e9;
-      let bestK = 0;
-      for (let k = 0; k < prevL.length; k++) {
-        let trans = 0;
-        if (!isBreak) {
-          const biRaw = lmBigramNorm(lm, prevL[k].cid, cj.cid);
-          if (biRaw > 0) {
-            if (prevLow && curLow) {
-              // 双低置信位：仅强搭配（>=0.26）才给语境加分，避免低分框互相牵引到泛用虚词
-              trans = biRaw >= 0.26 ? BI_W * 0.80 * Math.pow(biRaw, 0.72) : 0;
-            } else if (prevLow || curLow) {
-              // 一侧高置信一侧低置信：滤除极弱偶发二元，保留真实搭配（如「春色」「入眼」「见鱼」）
-              trans = biRaw >= 0.14 ? BI_W * Math.pow(biRaw, 0.62) : 0;
-            } else {
-              trans = BI_W * Math.pow(biRaw, 0.6);
-            }
+  const triTrans = (cPrev2, cPrev1, cCur, b1, b2, low2, low1, low0) => {
+    if (TRI_W <= 0 || b1 || b2) return 0;
+    const triRaw = lmTrigramNorm(lm, cPrev2.cid, cPrev1.cid, cCur.cid, domId);
+    if (triRaw <= 0) return 0;
+    const nLow = (low2 ? 1 : 0) + (low1 ? 1 : 0) + (low0 ? 1 : 0);
+    if (nLow >= 2) return triRaw >= 0.28 ? TRI_W * 0.75 * Math.pow(triRaw, 0.72) : 0;
+    return TRI_W * Math.pow(triRaw, 0.60);
+  };
+
+  // 二阶 Viterbi DP: 状态为 (prev_idx, cur_idx) 展平为 prev_idx * curLen + cur_idx
+  // i = 0 -> 1 初始化
+  const L0 = layers[0].length;
+  const L1 = layers[1].length;
+  const dp2 = new Array(N);
+  const back2 = new Array(N);
+  dp2[1] = new Float64Array(L0 * L1);
+  back2[1] = new Int16Array(L0 * L1);
+  {
+    const isBreak = breaks[1] === 1;
+    const low0 = enableConfGuard && rawTop1s[0] < LOW_CONF_THR;
+    const low1 = enableConfGuard && rawTop1s[1] < LOW_CONF_THR;
+    for (let k = 0; k < L0; k++) {
+      for (let j = 0; j < L1; j++) {
+        dp2[1][k * L1 + j] = layers[0][k].emit + biTrans(layers[0][k], layers[1][j], isBreak, low0, low1) + layers[1][j].emit;
+        back2[1][k * L1 + j] = k;
+      }
+    }
+  }
+
+  for (let i = 2; i < N; i++) {
+    const Lp2 = layers[i - 2].length;
+    const Lp1 = layers[i - 1].length;
+    const Lc = layers[i].length;
+    const curDp = new Float64Array(Lp1 * Lc);
+    const curBack = new Int16Array(Lp1 * Lc);
+    const b1 = breaks[i - 1] === 1;
+    const b2 = breaks[i] === 1;
+    const low2 = enableConfGuard && rawTop1s[i - 2] < LOW_CONF_THR;
+    const low1 = enableConfGuard && rawTop1s[i - 1] < LOW_CONF_THR;
+    const low0 = enableConfGuard && rawTop1s[i] < LOW_CONF_THR;
+    const prevDp = dp2[i - 1];
+
+    for (let k = 0; k < Lp1; k++) {
+      const ck = layers[i - 1][k];
+      for (let j = 0; j < Lc; j++) {
+        const cj = layers[i][j];
+        const bScore = biTrans(ck, cj, b2, low1, low0);
+        let bestVal = -1e12;
+        let bestM = 0;
+        for (let m = 0; m < Lp2; m++) {
+          const tScore = triTrans(layers[i - 2][m], ck, cj, b1, b2, low2, low1, low0);
+          const val = prevDp[m * Lp1 + k] + bScore + tScore + cj.emit;
+          if (val > bestVal) {
+            bestVal = val;
+            bestM = m;
           }
         }
-        const val = dp[i - 1][k] + trans + cj.emit;
-        if (val > bestVal) {
-          bestVal = val;
-          bestK = k;
-        }
+        curDp[k * Lc + j] = bestVal;
+        curBack[k * Lc + j] = bestM;
       }
-      curDp[j] = bestVal;
-      curBack[j] = bestK;
     }
-    dp.push(curDp);
-    back.push(curBack);
+    dp2[i] = curDp;
+    back2[i] = curBack;
   }
 
-  let bestLast = 0;
-  for (let j = 1; j < dp[N - 1].length; j++) {
-    if (dp[N - 1][j] > dp[N - 1][bestLast]) bestLast = j;
+  // 回溯最优状态链
+  const lastDp = dp2[N - 1];
+  const lastLp1 = layers[N - 2].length;
+  const lastLc = layers[N - 1].length;
+  let bestPair = 0;
+  for (let s = 1; s < lastDp.length; s++) {
+    if (lastDp[s] > lastDp[bestPair]) bestPair = s;
   }
-  const path = new Array(N);
-  let cur = bestLast;
-  for (let i = N - 1; i >= 0; i--) {
-    path[i] = layers[i][cur];
-    cur = back[i][cur];
+  const chosenIdx = new Int16Array(N);
+  chosenIdx[N - 2] = Math.floor(bestPair / lastLc);
+  chosenIdx[N - 1] = bestPair % lastLc;
+  for (let i = N - 1; i >= 2; i--) {
+    const Lc = layers[i].length;
+    chosenIdx[i - 2] = back2[i][chosenIdx[i - 1] * Lc + chosenIdx[i]];
   }
+  const path = Array.from(chosenIdx, (ci, i) => layers[i][ci]);
 
   return path.map((chosen, i) => {
     const top1 = items[i].hits?.[0];
     const rescued = Boolean(chosen.hit && top1 && chosen.char !== top1.char);
-    // 若语境救回的字不在当前显示的 hits 前列，确保把它补进 hits 便于前端直接选中高亮
     if (rescued && chosen.hit && !items[i].hits.some((h) => h.id === chosen.hit.id)) {
       items[i].hits.push(chosen.hit);
     }
@@ -1825,10 +1978,11 @@ self.onmessage = async (ev) => {
         });
       }
 
-      // 古汉语二元字频 Viterbi 语境重排（自动断列/断行 + 低置信防护，< 2ms）
+      // 古汉语三元+四分域二阶 Viterbi 语境重排（自动断列/断行 + 领域感知 + 低置信防护，< 2ms）
       const lm = await ensureClassicalBigram();
       const lmRes = viterbiRerankMulti(items, lm, {
         orderMode,
+        styleStr,
         enableBreakGuard: msg.enableBreakGuard !== false,
         enableConfGuard: msg.enableConfGuard !== false,
       });
@@ -1945,6 +2099,7 @@ self.onmessage = async (ev) => {
       }));
       const lmRes = viterbiRerankMulti(items, lm, {
         orderMode: msg.orderMode || "vertical-rl",
+        styleStr: msg.style || "",
       });
       self.postMessage({ type: "multi_reranked", reqId: msg.reqId || 0, lmRes });
     } else if (msg.cmd === "clear_cache") {

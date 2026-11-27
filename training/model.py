@@ -80,27 +80,82 @@ def load_rubbing_autoinv(path: str | Path) -> Image.Image:
 
 
 def preprocess_upload(pil_img: Image.Image, size: int = 256) -> Image.Image:
-    """Standard single-character upload preprocessing (colored lacquer detection + adaptive threshold + border strip)."""
+    """Standard single-character upload preprocessing:
+    CIE-Lab a* red-seal extraction (朱文/白文) + uneven-shadow flattening + Hybrid Sauvola + border strip."""
     if pil_img.mode in ("RGBA", "LA", "P"):
         rgba = pil_img.convert("RGBA")
         bg = Image.new("RGB", rgba.size, (255, 255, 255))
         bg.paste(rgba, mask=rgba.split()[-1])
         pil_img = bg
-    rgb = np.asarray(pil_img.convert("RGB")).astype(np.int16)
-    diff = np.stack([
-        np.abs(rgb[:, :, 0] - rgb[:, :, 1]),
-        np.abs(rgb[:, :, 0] - rgb[:, :, 2]),
-        np.abs(rgb[:, :, 1] - rgb[:, :, 2]),
-    ], -1).max(-1)
-    colored = (diff > 30).mean()
-    if 0.005 < colored < 0.6:
-        bw = np.where(diff > 30, 0, 255).astype(np.uint8)
-        bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
-    else:
-        g = np.asarray(pil_img.convert("L"))
-        bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, 51, 10)
-        if (bw == 0).mean() > 0.5:
-            bw = 255 - bw
+    rgb_u8 = np.asarray(pil_img.convert("RGB"))
+    H0, W0 = rgb_u8.shape[:2]
+    cx0, cx1 = int(W0 * 0.15), max(int(W0 * 0.15) + 1, int(W0 * 0.85))
+    cy0, cy1 = int(H0 * 0.15), max(int(H0 * 0.15) + 1, int(H0 * 0.85))
+
+    # 1) CIE-Lab a* red-seal ink channel (immune to yellowed paper/bamboo; supports both 朱文 and 白文)
+    lab = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2LAB).astype(np.float32)
+    a_ch = lab[:, :, 1] - 128.0
+    rf, gf, bf = rgb_u8[:, :, 0].astype(np.float32), rgb_u8[:, :, 1].astype(np.float32), rgb_u8[:, :, 2].astype(np.float32)
+    red_m = (a_ch > 15.0) & ((rf - gf) > 14.0) & ((rf - bf) > 10.0)
+    red_frac = float(red_m.mean())
+    core_red_frac = float(red_m[cy0:cy1, cx0:cx1].mean())
+    red_in_core = float(red_m[cy0:cy1, cx0:cx1].sum()) / max(1.0, float(red_m.sum()))
+
+    bw = None
+    if red_frac > 0.025 and core_red_frac >= 0.03 and red_in_core >= 0.42:
+        a_u8 = np.clip(a_ch + 128.0, 0, 255).astype(np.uint8)
+        thr_raw, _ = cv2.threshold(a_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        lo_m = a_u8 <= thr_raw
+        hi_m = a_u8 > thr_raw
+        if lo_m.any() and hi_m.any():
+            m_lo, m_hi = float(a_u8[lo_m].mean()), float(a_u8[hi_m].mean())
+            thr_a = 0.5 * (m_lo + m_hi)
+            if thr_a > 136.0 and (m_hi - m_lo) >= 12.0:
+                is_r = a_u8 >= thr_a
+                c_frac = float(is_r[cy0:cy1, cx0:cx1].mean())
+                if 0.025 <= c_frac <= 0.88:
+                    if c_frac > 0.52:  # 白文印 (white strokes in red seal)
+                        bw = np.where(is_r, 255, 0).astype(np.uint8)
+                    else:  # 朱文印 (red strokes on paper)
+                        bw = np.where(is_r, 0, 255).astype(np.uint8)
+                        k_cl = 5 if min(H0, W0) >= 96 else 3
+                        bw = 255 - cv2.morphologyEx(255 - bw, cv2.MORPH_CLOSE, np.ones((k_cl, k_cl), np.uint8))
+
+    if bw is None:
+        rgb = rgb_u8.astype(np.int16)
+        diff = np.stack([
+            np.abs(rgb[:, :, 0] - rgb[:, :, 1]),
+            np.abs(rgb[:, :, 0] - rgb[:, :, 2]),
+            np.abs(rgb[:, :, 1] - rgb[:, :, 2]),
+        ], -1).max(-1)
+        colored = (diff > 30).mean()
+        if 0.02 < colored < 0.60 and float((diff[cy0:cy1, cx0:cx1] > 30).mean()) >= 0.025:
+            bw = np.where(diff > 30, 0, 255).astype(np.uint8)
+            bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
+        else:
+            g = cv2.cvtColor(rgb_u8, cv2.COLOR_RGB2GRAY)
+            int_g = g[int(H0 * 0.1):max(int(H0 * 0.1) + 1, int(H0 * 0.9)),
+                      int(W0 * 0.1):max(int(W0 * 0.1) + 1, int(W0 * 0.9))]
+            is_wob = float(np.median(int_g)) < 126.0
+            if is_wob:
+                g = 255 - g
+            g_f = g.astype(np.float32)
+            # Gentle background illumination flattening only on large uneven-shadow photos
+            if min(H0, W0) >= 240:
+                bg_k = int(max(65, min(181, (min(H0, W0) // 2) | 1)))
+                mu_bg = cv2.boxFilter(g_f, -1, (bg_k, bg_k), borderType=cv2.BORDER_REPLICATE)
+                if float(mu_bg.max() - mu_bg.min()) > 48.0:
+                    sq_bg = cv2.boxFilter(g_f * g_f, -1, (bg_k, bg_k), borderType=cv2.BORDER_REPLICATE)
+                    sd_bg = np.sqrt(np.maximum(sq_bg - mu_bg * mu_bg, 0.0))
+                    est_bg = np.clip(mu_bg + 0.8 * sd_bg, 60.0, 255.0)
+                    g_f = np.clip(g_f * (240.0 / est_bg), 0.0, 255.0)
+            blk = int(max(17, min(161, (min(H0, W0) // 3) | 1)))
+            mu = cv2.boxFilter(g_f, -1, (blk, blk), borderType=cv2.BORDER_REPLICATE)
+            sq = cv2.boxFilter(g_f * g_f, -1, (blk, blk), borderType=cv2.BORDER_REPLICATE)
+            sd = np.sqrt(np.maximum(sq - mu * mu, 0.0))
+            c_base = 18.0 if is_wob else 12.0
+            c_adapt = c_base + 0.25 * np.maximum(0.0, 48.0 - sd)
+            bw = np.where(g_f < mu - c_adapt, 0, 255).astype(np.uint8)
     H, W = bw.shape
     for _ in range(4):
         dark = bw == 0
@@ -118,13 +173,16 @@ def preprocess_upload(pil_img: Image.Image, size: int = 256) -> Image.Image:
         bw[:, cols_hit] = 255
     n, _, stats, _ = cv2.connectedComponentsWithStats(255 - bw, 8)
     if n > 1:
-        i = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
-        x, y, w, h = (int(v) for v in stats[i, :4])
-        pad = 10
-        x, y = max(0, x - pad), max(0, y - pad)
-        bw = bw[y : y + h + 2 * pad, x : x + w + 2 * pad]
+        areas = stats[1:, cv2.CC_STAT_AREA]
+        keep = np.where(areas >= max(4, areas.max() * 0.03))[0] + 1
+        x = int(stats[keep, cv2.CC_STAT_LEFT].min())
+        y = int(stats[keep, cv2.CC_STAT_TOP].min())
+        x1 = int((stats[keep, cv2.CC_STAT_LEFT] + stats[keep, cv2.CC_STAT_WIDTH]).max())
+        y1 = int((stats[keep, cv2.CC_STAT_TOP] + stats[keep, cv2.CC_STAT_HEIGHT]).max())
+        pad = max(4, min(14, int(max(x1 - x, y1 - y) * 0.05)))
+        bw = bw[max(0, y - pad) : min(H, y1 + pad), max(0, x - pad) : min(W, x1 + pad)]
     im = Image.fromarray(bw)
-    im.thumbnail((size, size), Image.Resampling.LANCZOS)
+    im.thumbnail((208, 208), Image.Resampling.LANCZOS)
     canvas = Image.new("L", (size, size), 255)
     canvas.paste(im, ((size - im.width) // 2, (size - im.height) // 2))
     return canvas
@@ -330,9 +388,25 @@ class GlyphModel(nn.Module):
         return self.style_head(emb).argmax(1), self.dyn_head(emb).argmax(1)
 
 
-def load_glyph_model(ckpt_path: str | Path, device: str = "cuda") -> tuple[GlyphModel, dict]:
+def load_glyph_model(ckpt_path: str | Path, device: str = "cuda"):
     ck = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     sd = ck.get("model", ck.get("state_dict", ck))
+    if isinstance(ck, dict) and "meta_cfg" in ck:
+        from training.model_v12 import GlyphModelV12
+
+        mc = ck["meta_cfg"]
+        cleaned = {k.replace("_orig_mod.", ""): v for k, v in sd.items()}
+        model = GlyphModelV12(
+            arch=mc["arch"],
+            num_classes=mc["num_classes"],
+            num_styles=mc["num_styles"],
+            num_dynasties=mc["num_dynasties"],
+            num_ids=mc.get("num_ids", 0),
+            subcenters=mc.get("subcenters", 3),
+            pretrained=False,
+        ).to(device)
+        model.load_state_dict(cleaned, strict=True)
+        return model, cleaned
     nc = sd["head.weight"].shape[0]
     ns = sd["style_head.weight"].shape[0]
     nd = sd["dyn_head.weight"].shape[0]

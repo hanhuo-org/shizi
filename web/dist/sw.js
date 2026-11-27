@@ -5,7 +5,7 @@
  * - 不缓存 /models_chunks/*.gzbin（已由 OPFS 整包零合并管理）
  * - 对浏览过的 /glyph/* 代表原图做轻缓存（上限自动滚存），离线也能看查过的原图
  */
-const SW_CACHE_NAME = "hanzi-xing-pwa-20261123j";
+const SW_CACHE_NAME = "hanzi-xing-pwa-20261127a";
 
 function ensureIsolationHeaders(resp) {
   if (!resp || resp.type === "opaque") return resp;

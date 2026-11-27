@@ -6,7 +6,7 @@
  * 4. 静态资源三层强缓存 + COOP/COEP/CORP 跨域隔离头 + ETag/Last-Modified 304 协商
  */
 const _computedEtagCache = new Map();
-const BUILD_LAST_MODIFIED = "Sat, 21 Nov 2026 07:42:00 GMT";
+const BUILD_LAST_MODIFIED = "Fri, 27 Nov 2026 02:30:00 GMT";
 const BUILD_LAST_MODIFIED_MS = Date.parse(BUILD_LAST_MODIFIED);
 const MAX_UPLOAD_BYTES = 520 * 1024; // 单张框选 WebP 严格限 520 KB
 

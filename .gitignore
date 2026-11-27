@@ -22,6 +22,9 @@ web/dist/vendor/ort/
 web/dist/assets/*.bin
 web/dist/assets/*.gz
 
+# Private Kaggle/Colab launchers containing embedded rclone credentials (NEVER commit!)
+kaggle_private/
+
 # OS / Editor
 .DS_Store
 .vscode/
